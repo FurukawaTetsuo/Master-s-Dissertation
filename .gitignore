@@ -1,0 +1,16 @@
+.Rhistory
+.RData
+.RDataTmp
+.Rproj.user/
+.DS_Store
+**/.DS_Store
+
+~$*.docx
+
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.synctex.gz
+*.toc
+Data/
