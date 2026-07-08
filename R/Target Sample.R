@@ -1,0 +1,1 @@
+informal17 <- data17_18_fv[c("state_per_fv", "b1q4_per_fv")]
