@@ -25,15 +25,3 @@ data24 <- read.csv(here("Data","24","cperv1.csv"))
 
 data25 <- read_dta(here("Data","25","cperv12025.dta"))
 
-
-#state_district_codes <- unique(data17_18_fv[c("state_per_fv", "b1q4_per_fv")])
-
-#Find num of unique state-district combinations
-#nrow(state_district_codes)
-
-#for (x in 1:nrow(state_district_codes)) {
-#  state_district_codes$district[x] <- x
-#}
-
-#nstates <- as.integer(unique(data17_18_fv$state_per_fv))
-#length(nstates)
