@@ -15,8 +15,6 @@ data19_20_rv <- read_dta(here("Data","19-20","PERRV_2019-20.dta"))
 data20_21_fv <- read_dta(here("Data","20-21","perv1.dta"))
 data20_21_rv <- read_dta(here("Data","20-21","perrv.dta"))
 
-data21 <- read_dta(here("Data","21","cperv1.dta"))
-
 data22 <- read_dta(here("Data","22","cperv1.dta"))
 
 data23 <- read_dta(here("Data","23","cperv1.dta"))

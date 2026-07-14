@@ -1,33 +1,39 @@
-#Stripping stata labels for easier identificaiton
-pas17 <- haven::zap_labels(
-  data17_18_fv$b5pt1q3_per_fv
-)
-nic17 <- haven::zap_labels(
-  data17_18_fv$b5pt1q5_per_fv
-)
-enterprise17 <- haven::zap_labels(
-  data17_18_fv$b5pt1q9_per_fv
-)
-enterprise_size17 <- haven::zap_labels(
-  data17_18_fv$b5pt1q10_per_fv
-)
-ssec17 <- haven::zap_labels(
-  data17_18_fv$b5pt1q13_per_fv
+informal_transport17_18 <- make_informal_transport(
+  data17_18_fv,
+  columns17
 )
 
-# Passenger land transport
-transport17 <- substr(as.character(nic17),1,4) %in% c("4921", "4922")
+informal_transport18_19 <- make_informal_transport(
+  data18_19_fv,
+  columns18_19
+)
 
-# Informal wage/casual employees:
-# no specified social-security benefits
-informal_employee17 <-pas17 %in% c(31, 41, 51) & ssec17 == 8
+informal_transport19_20 <- make_informal_transport(
+  data19_20_fv,
+  columns19_20
+)
 
-# Informal self-employed workers:
-# unpaid family workers, or small proprietary/partnership enterprises
-informal_self_employed17 <- pas17 == 21 | (pas17 %in% c(11, 12) & 
-                                             enterprise17 %in% c(1, 2, 3, 4) & 
-                                             enterprise_size17 %in% c(1, 2)
-                                           )
+informal_transport20_21 <- make_informal_transport(
+  data20_21_fv,
+  columns20_21
+)
 
-# Final informal passenger-transport sample
-informal_transport17 <- data17_18_fv[transport17 & (informal_employee17 | informal_self_employed17),]
+informal_transport22 <- make_informal_transport(
+  data22,
+  columns22
+)
+
+informal_transport23 <- make_informal_transport(
+  data23,
+  columns23
+)
+
+informal_transport24 <- make_informal_transport(
+  data24,
+  columns24
+)
+
+informal_transport25 <- make_informal_transport(
+  data25,
+  columns25
+)
