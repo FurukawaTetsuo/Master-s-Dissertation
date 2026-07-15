@@ -1,3 +1,5 @@
+#Create data frames for informal transport for each year
+
 informal_transport17_18 <- make_informal_transport(
   data17_18_fv,
   columns17
@@ -37,3 +39,17 @@ informal_transport25 <- make_informal_transport(
   data25,
   columns25
 )
+
+
+#Adding year variable for time series
+informal_transport17_18$year <- 2017
+informal_transport18_19$year <- 2018
+informal_transport19_20$year <- 2019
+informal_transport20_21$year <- 2020
+informal_transport22$year <- 2022
+informal_transport23$year <- 2023
+informal_transport24$year <- 2024
+informal_transport25$year <- 2025
+
+
+
