@@ -1,36 +1,8 @@
 library(haven)
 
-
-# ============================================================
-# 1. Convert each variable to ordinary integer codes
-# ============================================================
-
-clean_code <- function(x) {
-  
-  if (
-    inherits(x, "haven_labelled") ||
-    inherits(x, "labelled")
-  ) {
-    x <- haven::zap_labels(x)
-  }
-  
-  # Convert factors, characters and numerics consistently
-  x <- trimws(as.character(x))
-  
-  # Replace blank strings with missing values
-  x[x == ""] <- NA_character_
-  
-  suppressWarnings(as.integer(x))
-}
-
-
-# ============================================================
-# 2. Function for identifying informal passenger transport
-# ============================================================
-
 make_informal_transport <- function(data, columns) {
   
-  # Check that the specified columns really exist
+  # Check that all specified columns exist
   missing_columns <- setdiff(
     unname(columns),
     names(data)
@@ -46,7 +18,7 @@ make_informal_transport <- function(data, columns) {
   }
   
   
-  # Extract and clean the required variables
+  # Extract and clean required variables
   pas <- clean_code(
     data[[columns[["pas"]]]]
   )
@@ -68,9 +40,7 @@ make_informal_transport <- function(data, columns) {
   )
   
   
-  # Convert NIC to a five-digit string
-  # This restores leading zeroes lost in the 2024 CSV:
-  # 1286 becomes 01286, for example.
+  # Convert NIC to five-digit character codes
   nic5 <- ifelse(
     is.na(nic),
     NA_character_,
@@ -78,20 +48,18 @@ make_informal_transport <- function(data, columns) {
   )
   
   
-  # Passenger land transport:
-  # NIC 4921 = urban/suburban passenger land transport
-  # NIC 4922 = other passenger land transport
+  # Passenger land transport
   passenger_transport <-
     substr(nic5, 1, 4) %in% c("4921", "4922")
   
   
-  # Wage/casual workers without listed social security
+  # Informal wage/casual employees
   informal_employee <-
     pas %in% c(31, 41, 51) &
     social_security == 8
   
   
-  # Self-employed informal workers
+  # Informal self-employed workers
   informal_self_employed <-
     pas == 21 |
     (
@@ -101,27 +69,38 @@ make_informal_transport <- function(data, columns) {
     )
   
   
-  # Keep people satisfying the transport and informality rules
-  keep <-
+  # Combine employee and self-employed definitions
+  informal_status <-
+    informal_employee |
+    informal_self_employed
+  
+  
+  # Convert missing logical results to FALSE
+  passenger_transport[is.na(passenger_transport)] <- FALSE
+  informal_status[is.na(informal_status)] <- FALSE
+  
+  
+  # Add binary variables to the new data frame
+  data$transport <- as.integer(
+    passenger_transport
+  )
+  
+  data$informal <- as.integer(
+    informal_status
+  )
+  
+  
+  # Optional combined indicator:
+  # 1 only when both informal and in passenger transport
+  data$informal_transport <- as.integer(
     passenger_transport &
-    (
-      informal_employee |
-        informal_self_employed
-    )
-  
-  # Do not retain observations with uncertain conditions
-  keep[is.na(keep)] <- FALSE
+      informal_status
+  )
   
   
-  # Return a separate data frame without changing the original
-  data[
-    keep,
-    ,
-    drop = FALSE
-  ]
+  # Return every observation
+  data
 }
-
-
 
 columns17 <- c(
   pas = "b5pt1q3_per_fv",
