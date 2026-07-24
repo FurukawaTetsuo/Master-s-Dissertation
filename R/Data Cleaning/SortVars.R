@@ -266,3 +266,25 @@ plfs_data_dictionaries <- imap(
 plfs_data_dictionary <- bind_rows(
   plfs_data_dictionaries
 )
+
+
+dictionary_folder <- here(
+  "Output",
+  "Data_Dictionary"
+)
+
+dir.create(
+  dictionary_folder,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+
+write.csv(
+  plfs_data_dictionary,
+  file.path(
+    dictionary_folder,
+    "plfs_complete_data_dictionary.csv"
+  ),
+  row.names = FALSE
+)

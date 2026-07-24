@@ -52,4 +52,53 @@ informal_transport24$year <- 2024
 informal_transport25$year <- 2025
 
 
+#Adding unique district identifiers
+informal_transport17_18 <- add_district_id(
+  informal_transport17_18,
+  state_column = "state_per_fv",
+  district_column = "b1q4_per_fv"
+)
+
+informal_transport18_19 <- add_district_id(
+  informal_transport18_19,
+  state_column = "state_per_fv",
+  district_column = "b1q4_per_fv"
+)
+
+informal_transport19_20 <- add_district_id(
+  informal_transport19_20,
+  state_column = "state_per_fv",
+  district_column = "b1q4_per_fv"
+)
+
+informal_transport20_21 <- add_district_id(
+  informal_transport20_21,
+  state_column = "state_perv1",
+  district_column = "distcode_perv1"
+)
+
+informal_transport22 <- add_district_id(
+  informal_transport22,
+  state_column = "state_cperv1",
+  district_column = "distcode_cperv1"
+)
+
+informal_transport23 <- add_district_id(
+  informal_transport23,
+  state_column = "state_cperv1",
+  district_column = "distcode_cperv1"
+)
+
+informal_transport24 <- add_district_id(
+  informal_transport24,
+  state_column = "State_UT_Code",
+  district_column = "District_Code"
+)
+
+informal_transport25 <- add_district_id(
+  informal_transport25,
+  state_column = "st",
+  district_column = "dc"
+)
+
 
