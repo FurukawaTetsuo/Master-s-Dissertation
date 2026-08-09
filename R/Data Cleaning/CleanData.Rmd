@@ -9,171 +9,850 @@ library(haven)
 library(here)
 
 data17_18_fv <- read_dta(here("Data", "17-18", "hh_per_fv_2017-18.dta"))
-#data17_18_rv <- read_dta(here("Data", "17-18", "hh_per_rv_2017-18.dta"))
 
 data18_19_fv <- read_dta(here("Data","18-19","PerV1_2018-19.dta"))
-#data18_19_rv <- read_dta(here("Data","18-19","PerRV_2018-19.dta"))
 
 data19_20_fv <- read_dta(here("Data","19-20","PERFV_2019-20.dta"))
-#data19_20_rv <- read_dta(here("Data","19-20","PERRV_2019-20.dta"))
 
 data20_21_fv <- read_dta(here("Data","20-21","perv1.dta"))
-#data20_21_rv <- read_dta(here("Data","20-21","perrv.dta"))
+
+data21_22_fv <- readr::read_csv(here("Data","21-22","perv1.csv"))
 
 data22 <- read_dta(here("Data","22","cperv1.dta"))
 
 data23 <- read_dta(here("Data","23","cperv1.dta"))
 
-data24 <- read.csv(here("Data","24","cperv1.csv"))
+data24 <- read_dta(here("Data","24","cperv1.dta"))
 
 data25 <- read_dta(here("Data","25","cperv12025.dta"))
 
+```
+
+Informal and Transport binaries.
+
+```{r}
+library(dplyr)
+
+
+NIC <- data17_18_fv$b5pt2q5_per_fv
+NCO <- data17_18_fv$b5pt2q6_per_fv
+
+analysis17_18 <- data17_18_fv
+
+analysis17_18$transport <- ifelse(
+  NIC %in% c("49211", "49219", "4911", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
+
+
+# 
+# analysis17_18 <- data.frame(NIC, NCO)
+# 
+# 
+# data17_18_fv %>% count(b5pt2q5_per_fv)
 
 ```
 
-Function for cleaning the dataset, so that the stata labels don't interfere with the data cleaning process.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Function for cleaning the dataset, so that the stata labels don't interfere with the data cleaning process.
 ```{r}
+# ============================================================
+# CLEAN PLFS CODE VARIABLES
+# ============================================================
+
 clean_code <- function(x) {
-  
-  # Remove the special Stata-labelled class
-  if (inherits(x, "haven_labelled") ||
-      inherits(x, "labelled")) {
+
+  # Remove Stata value labels while preserving underlying codes
+  if (
+    inherits(x, "haven_labelled") ||
+    inherits(x, "labelled")
+  ) {
     x <- haven::zap_labels(x)
   }
-  
-  # Convert factors to character first
+
+  # Prevent factors from being converted to their level numbers
   if (is.factor(x)) {
     x <- as.character(x)
   }
-  
-  suppressWarnings(as.numeric(x))
+
+  # Clean character-formatted codes
+  if (is.character(x)) {
+
+    x <- trimws(x)
+
+    x[
+      x %in% c(
+        "",
+        "NA",
+        "N.A.",
+        "NaN",
+        "NULL",
+        "-",
+        "--"
+      )
+    ] <- NA_character_
+
+    # Convert values such as "31.0" to "31"
+    x <- sub(
+      "\\.0+$",
+      "",
+      x
+    )
+  }
+
+  suppressWarnings(
+    as.numeric(x)
+  )
 }
 
-make_informal_transport <- function(data, columns) {
-  
-  # Check that all specified columns exist
-  missing_columns <- setdiff(
-    unname(columns),
-    names(data)
+
+# ============================================================
+# CLEAN NIC INDUSTRY CODES
+#
+# Retains whether the original code was recorded at:
+#   4-digit level, e.g. 4921
+#   5-digit level, e.g. 49213
+#
+# This is necessary because a four-digit 4921 code cannot
+# distinguish buses from trams or metro rail.
+# ============================================================
+
+clean_nic_code <- function(x) {
+
+  # Remove Stata value labels while preserving underlying codes
+  if (
+    inherits(x, "haven_labelled") ||
+      inherits(x, "labelled")
+  ) {
+    x <- haven::zap_labels(x)
+  }
+
+  # Prevent factors being converted to factor-level numbers
+  if (is.factor(x)) {
+    x <- as.character(x)
+  }
+
+  x <- trimws(
+    as.character(x)
   )
-  
-  if (length(missing_columns) > 0) {
+
+  x[
+    x %in% c(
+      "",
+      "NA",
+      "N.A.",
+      "NaN",
+      "NULL",
+      "-",
+      "--"
+    )
+  ] <- NA_character_
+
+  # Remove decimal suffixes created during CSV import
+  x <- sub(
+    "\\.0+$",
+    "",
+    x
+  )
+
+  # Remove spaces and other non-numeric characters
+  x <- gsub(
+    "[^0-9]",
+    "",
+    x
+  )
+
+  # Blank strings created by cleaning become missing
+  x[
+    x == ""
+  ] <- NA_character_
+
+  # Only accept four- or five-digit NIC codes
+  x[
+    !is.na(x) &
+      !(nchar(x) %in% c(4L, 5L))
+  ] <- NA_character_
+
+  x
+}
+
+
+# ============================================================
+# CREATE NON-METRO TRANSPORT AND INFORMAL-EMPLOYMENT VARIABLES
+#
+# Main variables created:
+#
+# transport
+#   1 = non-metro passenger land transport worker
+#   0 = not a non-metro passenger transport worker
+#  NA = insufficient NIC detail to determine status
+#
+# metro_worker
+#   1 = NIC 49213
+#
+# tram_worker
+#   1 = NIC 49212
+#
+# passenger_land_transport_broad
+#   1 = any NIC beginning 4921 or 4922, including metro/tram
+#
+# informal_transport
+#   1 = informal AND non-metro passenger transport
+# ============================================================
+
+make_informal_transport <- function(
+    data,
+    columns,
+    dataset_name = "dataset"
+) {
+
+  # ----------------------------------------------------------
+  # Check that the column mapping contains all required keys
+  # ----------------------------------------------------------
+
+  required_keys <- c(
+    "pas",
+    "nic",
+    "enterprise",
+    "enterprise_size",
+    "social_security"
+  )
+
+  missing_keys <- setdiff(
+    required_keys,
+    names(columns)
+  )
+
+  if (length(missing_keys) > 0L) {
+
     stop(
-      paste(
-        "The following columns are missing:",
-        paste(missing_columns, collapse = ", ")
+      paste0(
+        dataset_name,
+        " column mapping is missing: ",
+        paste(
+          missing_keys,
+          collapse = ", "
+        )
       )
     )
   }
-  
-  
-  # Extract and clean required variables
+
+
+  mapped_columns <- unname(
+    unlist(
+      columns[required_keys]
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # Check that all mapped variables exist
+  # ----------------------------------------------------------
+
+  missing_columns <- setdiff(
+    mapped_columns,
+    names(data)
+  )
+
+  if (length(missing_columns) > 0L) {
+
+    stop(
+      paste0(
+        dataset_name,
+        " is missing the following variables: ",
+        paste(
+          missing_columns,
+          collapse = ", "
+        )
+      )
+    )
+  }
+
+
+  rows_before <- nrow(data)
+
+
+  # ----------------------------------------------------------
+  # Extract and clean the required variables
+  # ----------------------------------------------------------
+
   pas <- clean_code(
     data[[columns[["pas"]]]]
   )
-  
-  nic <- clean_code(
+
+  nic_code_clean <- clean_nic_code(
     data[[columns[["nic"]]]]
   )
-  
+
   enterprise <- clean_code(
     data[[columns[["enterprise"]]]]
   )
-  
+
   enterprise_size <- clean_code(
     data[[columns[["enterprise_size"]]]]
   )
-  
+
   social_security <- clean_code(
     data[[columns[["social_security"]]]]
   )
-  
-  
-  # Convert NIC to five-digit character codes
-  nic5 <- ifelse(
-    is.na(nic),
-    NA_character_,
-    sprintf("%05d", nic)
+
+
+  # ----------------------------------------------------------
+  # Construct four- and five-digit NIC versions
+  # ----------------------------------------------------------
+
+  nic_code_digits <- ifelse(
+    is.na(nic_code_clean),
+    NA_integer_,
+    nchar(nic_code_clean)
   )
-  
-  
-  # Passenger land transport
-  passenger_transport <-
-    substr(nic5, 1, 4) %in% c("4921", "4922")
-  
-  
-  # Informal wage/casual employees
-  informal_employee <-
-    pas %in% c(31, 41, 51) &
-    social_security == 8
-  
-  
-  # Informal self-employed workers
-  informal_self_employed <-
-    pas == 21 |
-    (
-      pas %in% c(11, 12) &
-        enterprise %in% c(1, 2, 3, 4) &
-        enterprise_size %in% c(1, 2)
+
+
+  nic4 <- ifelse(
+    is.na(nic_code_clean),
+    NA_character_,
+    substr(
+      nic_code_clean,
+      1,
+      4
     )
-  # Informal employment in any industry
-  informal_status <-
-    informal_employee |
-    informal_self_employed
+  )
 
 
-  # Flag employed observations whose informality is unknown
-  informal_unknown <-
-    (
-      pas %in% c(31, 41, 51) &
-      !(social_security %in% 1:8)
-    ) |
-    (
-      pas %in% c(11, 12) &
-      (
-        is.na(enterprise) |
-        is.na(enterprise_size)
+  nic5 <- ifelse(
+    nic_code_digits == 5L,
+    nic_code_clean,
+    NA_character_
+  )
+
+
+  # ----------------------------------------------------------
+  # Employment status
+  # ----------------------------------------------------------
+
+  employed_status <- pas %in% c(
+    11,
+    12,
+    21,
+    31,
+    41,
+    51
+  )
+
+
+  # ----------------------------------------------------------
+  # Broad passenger-land-transport indicator
+  #
+  # Includes:
+  #   buses
+  #   taxis
+  #   private-hire vehicles
+  #   other passenger transport
+  #   tramways
+  #   metro/underground/elevated railways
+  # ----------------------------------------------------------
+
+  passenger_land_transport_broad <- case_when(
+
+    is.na(pas) ~
+      NA_integer_,
+
+    !employed_status ~
+      0L,
+
+    employed_status &
+      is.na(nic4) ~
+      NA_integer_,
+
+    nic4 %in% c(
+      "4921",
+      "4922"
+    ) ~
+      1L,
+
+    TRUE ~
+      0L
+  )
+
+
+  # ----------------------------------------------------------
+  # Metro worker
+  #
+  # NIC 49213:
+  # Urban/suburban underground or elevated railways
+  #
+  # A four-digit 4921 code is ambiguous because it could be:
+  #   49211 bus
+  #   49212 tram
+  #   49213 metro
+  #   49219 other passenger transport
+  # ----------------------------------------------------------
+
+  metro_worker_status <- case_when(
+
+    is.na(pas) ~
+      NA_integer_,
+
+    !employed_status ~
+      0L,
+
+    employed_status &
+      is.na(nic_code_clean) ~
+      NA_integer_,
+
+    nic5 == "49213" ~
+      1L,
+
+    nic_code_digits == 4L &
+      nic4 == "4921" ~
+      NA_integer_,
+
+    TRUE ~
+      0L
+  )
+
+
+  # ----------------------------------------------------------
+  # Tram worker
+  #
+  # NIC 49212:
+  # Urban/suburban tramways
+  # ----------------------------------------------------------
+
+  tram_worker_status <- case_when(
+
+    is.na(pas) ~
+      NA_integer_,
+
+    !employed_status ~
+      0L,
+
+    employed_status &
+      is.na(nic_code_clean) ~
+      NA_integer_,
+
+    nic5 == "49212" ~
+      1L,
+
+    nic_code_digits == 4L &
+      nic4 == "4921" ~
+      NA_integer_,
+
+    TRUE ~
+      0L
+  )
+
+
+  # ----------------------------------------------------------
+  # Non-metro passenger-transport worker
+  #
+  # Included five-digit NIC codes:
+  #
+  # 49211 = urban/suburban passenger buses
+  # 49219 = other urban/suburban passenger transport
+  # 49221 = long-distance buses
+  # 49222 = charter/coach services
+  # 49223 = private cars with drivers
+  # 49224 = taxi operation
+  # 49225 = school/employee buses
+  # 49226 = human/animal-drawn passenger vehicles
+  # 49229 = other non-urban passenger transport
+  #
+  # Excluded:
+  #
+  # 49212 = tramways
+  # 49213 = metro/underground/elevated railway
+  # ----------------------------------------------------------
+
+  non_metro_transport_codes <- c(
+    "49211",
+    "49219",
+    "49221",
+    "49222",
+    "49223",
+    "49224",
+    "49225",
+    "49226",
+    "49229"
+  )
+
+
+  transport_status <- case_when(
+
+    # PAS is unavailable
+    is.na(pas) ~
+      NA_integer_,
+
+
+    # Known non-employed observation
+    !employed_status ~
+      0L,
+
+
+    # Employed but NIC is unavailable or malformed
+    employed_status &
+      is.na(nic_code_clean) ~
+      NA_integer_,
+
+
+    # Exact five-digit non-metro transport code
+    nic5 %in%
+      non_metro_transport_codes ~
+      1L,
+
+
+    # Explicitly exclude tram and metro workers
+    nic5 %in% c(
+      "49212",
+      "49213"
+    ) ~
+      0L,
+
+
+    # Four-digit 4922 is safe to include because its
+    # subclasses are non-metro passenger land transport
+    nic_code_digits == 4L &
+      nic4 == "4922" ~
+      1L,
+
+
+    # Four-digit 4921 cannot distinguish bus from metro/tram
+    nic_code_digits == 4L &
+      nic4 == "4921" ~
+      NA_integer_,
+
+
+    # Employed in another known industry
+    TRUE ~
+      0L
+  )
+
+
+  # ----------------------------------------------------------
+  # Informal employment
+  # ----------------------------------------------------------
+
+  informal_status <- case_when(
+
+    # PAS cannot be identified
+    is.na(pas) ~
+      NA_integer_,
+
+
+    # --------------------------------------------------------
+    # Wage or casual employees
+    # --------------------------------------------------------
+
+    pas %in% c(
+      31,
+      41,
+      51
+    ) &
+      social_security == 8 ~
+      1L,
+
+
+    pas %in% c(
+      31,
+      41,
+      51
+    ) &
+      social_security %in% 1:7 ~
+      0L,
+
+
+    # Employee but social-security status is unavailable
+    pas %in% c(
+      31,
+      41,
+      51
+    ) ~
+      NA_integer_,
+
+
+    # --------------------------------------------------------
+    # Unpaid household helpers
+    # --------------------------------------------------------
+
+    pas == 21 ~
+      1L,
+
+
+    # --------------------------------------------------------
+    # Own-account workers and employers
+    # --------------------------------------------------------
+
+    pas %in% c(
+      11,
+      12
+    ) &
+      enterprise %in% c(
+        1,
+        2,
+        3,
+        4
+      ) &
+      enterprise_size %in% c(
+        1,
+        2
+      ) ~
+      1L,
+
+
+    # Known enterprise type outside the informal definition
+    pas %in% c(
+      11,
+      12
+    ) &
+      !is.na(enterprise) &
+      !(enterprise %in% c(
+        1,
+        2,
+        3,
+        4
+      )) ~
+      0L,
+
+
+    # Known enterprise size outside the informal definition
+    pas %in% c(
+      11,
+      12
+    ) &
+      !is.na(enterprise_size) &
+      !(enterprise_size %in% c(
+        1,
+        2
+      )) ~
+      0L,
+
+
+    # Self-employed but insufficient information to classify
+    pas %in% c(
+      11,
+      12
+    ) ~
+      NA_integer_,
+
+
+    # Known non-employed status
+    TRUE ~
+      0L
+  )
+
+
+  # ----------------------------------------------------------
+  # Informal non-metro passenger transport
+  # ----------------------------------------------------------
+
+  informal_transport_status <- case_when(
+
+    # Definitely not a non-metro transport worker
+    transport_status == 0L ~
+      0L,
+
+    # Definitely not informal
+    informal_status == 0L ~
+      0L,
+
+    # Informal non-metro passenger transport worker
+    transport_status == 1L &
+      informal_status == 1L ~
+      1L,
+
+    # At least one component cannot be classified
+    TRUE ~
+      NA_integer_
+  )
+
+
+  # ----------------------------------------------------------
+  # Add main outcome variables
+  # ----------------------------------------------------------
+
+  data$transport <-
+    transport_status
+
+  data$informal <-
+    informal_status
+
+  data$informal_transport <-
+    informal_transport_status
+
+
+  # ----------------------------------------------------------
+  # Add separate transport-category audit variables
+  # ----------------------------------------------------------
+
+  data$passenger_land_transport_broad <-
+    passenger_land_transport_broad
+
+  data$metro_worker <-
+    metro_worker_status
+
+  data$tram_worker <-
+    tram_worker_status
+
+
+  # ----------------------------------------------------------
+  # Unknown-classification audit variables
+  # ----------------------------------------------------------
+
+  data$transport_unknown <- as.integer(
+    is.na(
+      transport_status
+    )
+  )
+
+  data$informal_unknown <- as.integer(
+    is.na(
+      informal_status
+    )
+  )
+
+  data$informal_transport_unknown <- as.integer(
+    is.na(
+      informal_transport_status
+    )
+  )
+
+  data$metro_worker_unknown <- as.integer(
+    is.na(
+      metro_worker_status
+    )
+  )
+
+
+  # Specifically identifies ambiguous four-digit 4921 codes
+  data$transport_scope_unknown <- as.integer(
+    employed_status &
+      nic_code_digits == 4L &
+      nic4 == "4921"
+  )
+
+  data$transport_scope_unknown[
+    is.na(
+      data$transport_scope_unknown
+    )
+  ] <- 0L
+
+
+  # ----------------------------------------------------------
+  # Retain cleaned NIC variables for auditing
+  # ----------------------------------------------------------
+
+  data$nic_code_clean <-
+    nic_code_clean
+
+  data$nic_code_digits <-
+    nic_code_digits
+
+  data$nic4_clean <-
+    nic4
+
+  data$nic5_clean <-
+    nic5
+
+
+  # ----------------------------------------------------------
+  # Confirm no respondent rows were added or removed
+  # ----------------------------------------------------------
+
+  if (nrow(data) != rows_before) {
+
+    stop(
+      paste(
+        dataset_name,
+        "row count changed while creating outcomes."
       )
     )
-
-  informal_unknown[is.na(informal_unknown)] <- FALSE
-
-
-  # Convert missing transport/informal results to FALSE
-  passenger_transport[is.na(passenger_transport)] <- FALSE
-  informal_status[is.na(informal_status)] <- FALSE
+  }
 
 
-  # Add the three binary outcome variables
-  data$transport <- as.integer(
-    passenger_transport
-  )
+  # ----------------------------------------------------------
+  # Confirm binary variables contain only 0, 1 or NA
+  # ----------------------------------------------------------
 
-  data$informal <- as.integer(
-    informal_status
-  )
-
-  data$informal_transport <- as.integer(
-    passenger_transport &
-    informal_status
-  )
-
-
-  # Retain an audit flag for uncertain classifications
-  data$informal_unknown <- as.integer(
-    informal_unknown
+  binary_variables <- c(
+    "transport",
+    "informal",
+    "informal_transport",
+    "passenger_land_transport_broad",
+    "metro_worker",
+    "tram_worker",
+    "transport_unknown",
+    "informal_unknown",
+    "informal_transport_unknown",
+    "metro_worker_unknown",
+    "transport_scope_unknown"
   )
 
 
-  # Return every original observation
+  for (variable_name in binary_variables) {
+
+    invalid_values <- unique(
+      data[[variable_name]][
+        !is.na(data[[variable_name]]) &
+          !(data[[variable_name]] %in% c(
+            0L,
+            1L
+          ))
+      ]
+    )
+
+    if (length(invalid_values) > 0L) {
+
+      stop(
+        paste(
+          dataset_name,
+          "-",
+          variable_name,
+          "contains values other than 0, 1 or NA."
+        )
+      )
+    }
+  }
+
+
   data
 }
 ```
 
-Identifying which columns to clean/look for to identify transport and informal workers.
+Creating analysis dataset: Finding informal transport workers
 ```{r}
-columns17 <- c(
+# ============================================================
+# 3. MAP PLFS VARIABLES USED TO IDENTIFY
+#    TRANSPORT AND INFORMAL EMPLOYMENT
+# ============================================================
+
+library(dplyr)
+library(purrr)
+library(tibble)
+
+
+# ------------------------------------------------------------
+# 2017-18
+# ------------------------------------------------------------
+
+columns17_18 <- c(
   pas = "b5pt1q3_per_fv",
   nic = "b5pt1q5_per_fv",
   enterprise = "b5pt1q9_per_fv",
@@ -181,6 +860,10 @@ columns17 <- c(
   social_security = "b5pt1q13_per_fv"
 )
 
+
+# ------------------------------------------------------------
+# 2018-19
+# ------------------------------------------------------------
 
 columns18_19 <- c(
   pas = "b5pt1q3_per_fv",
@@ -191,6 +874,10 @@ columns18_19 <- c(
 )
 
 
+# ------------------------------------------------------------
+# 2019-20
+# ------------------------------------------------------------
+
 columns19_20 <- c(
   pas = "b5pt1q3_per_fv",
   nic = "b5pt1q5_per_fv",
@@ -199,6 +886,10 @@ columns19_20 <- c(
   social_security = "b5pt1q13_per_fv"
 )
 
+
+# ------------------------------------------------------------
+# 2020-21
+# ------------------------------------------------------------
 
 columns20_21 <- c(
   pas = "b5pt1q3_perv1",
@@ -209,6 +900,25 @@ columns20_21 <- c(
 )
 
 
+# ------------------------------------------------------------
+# July 2021-June 2022
+#
+# This section is used only if data21_22_fv has been imported.
+# ------------------------------------------------------------
+
+columns21_22 <- c(
+  pas = "b5pt1q3_perv1",
+  nic = "b5pt1q5_perv1",
+  enterprise = "b5pt1q9_perv1",
+  enterprise_size = "b5pt1q10_perv1",
+  social_security = "b5pt1q13_perv1"
+)
+
+
+# ------------------------------------------------------------
+# Calendar year 2022
+# ------------------------------------------------------------
+
 columns22 <- c(
   pas = "b5pt1q3_cperv1",
   nic = "b5pt1q5_cperv1",
@@ -217,6 +927,10 @@ columns22 <- c(
   social_security = "b5pt1q13_cperv1"
 )
 
+
+# ------------------------------------------------------------
+# Calendar year 2023
+# ------------------------------------------------------------
 
 columns23 <- c(
   pas = "b5pt1q3_cperv1",
@@ -227,6 +941,10 @@ columns23 <- c(
 )
 
 
+# ------------------------------------------------------------
+# Calendar year 2024
+# ------------------------------------------------------------
+
 columns24 <- c(
   pas = "Principal_Status_Code",
   nic = "Principal_Industry_Code",
@@ -236,6 +954,10 @@ columns24 <- c(
 )
 
 
+# ------------------------------------------------------------
+# Calendar year 2025
+# ------------------------------------------------------------
+
 columns25 <- c(
   pas = "pas",
   nic = "ind_pas",
@@ -244,31 +966,1113 @@ columns25 <- c(
   social_security = "ssec_pas"
 )
 
+
+# ============================================================
+# 4. CREATE A REGISTRY OF DATASETS AND VARIABLE MAPPINGS
+# ============================================================
+
+outcome_registry <- list(
+  `2017-18` = list(
+    data = data17_18_fv,
+    columns = columns17_18,
+    output_name = "analysis17_18"
+  ),
+
+  `2018-19` = list(
+    data = data18_19_fv,
+    columns = columns18_19,
+    output_name = "analysis18_19"
+  ),
+
+  `2019-20` = list(
+    data = data19_20_fv,
+    columns = columns19_20,
+    output_name = "analysis19_20"
+  ),
+
+  `2020-21` = list(
+    data = data20_21_fv,
+    columns = columns20_21,
+    output_name = "analysis20_21"
+  ),
+
+  `2022` = list(
+    data = data22,
+    columns = columns22,
+    output_name = "analysis22"
+  ),
+
+  `2023` = list(
+    data = data23,
+    columns = columns23,
+    output_name = "analysis23"
+  ),
+
+  `2024` = list(
+    data = data24,
+    columns = columns24,
+    output_name = "analysis24"
+  ),
+
+  `2025` = list(
+    data = data25,
+    columns = columns25,
+    output_name = "analysis25"
+  )
+)
+
+
+# Add the July 2021-June 2022 file if it has been imported
+if (exists("data21_22_fv")) {
+
+  outcome_registry <- append(
+    outcome_registry,
+    list(
+      `2021-22` = list(
+        data = data21_22_fv,
+        columns = columns21_22,
+        output_name = "analysis21_22"
+      )
+    ),
+    after = 4
+  )
+}
+
+
+# ============================================================
+# 5. AUDIT THE VARIABLE MAPPINGS
+# ============================================================
+
+mapping_audit <- imap_dfr(
+  outcome_registry,
+  function(item, dataset_name) {
+
+    tibble(
+      dataset = dataset_name,
+      variable_role = names(item$columns),
+      source_column = unname(item$columns),
+      column_exists = unname(item$columns) %in%
+        names(item$data)
+    )
+  }
+)
+
+
+print(
+  mapping_audit,
+  n = Inf
+)
+
+
+missing_mapped_columns <- mapping_audit %>%
+  filter(
+    !column_exists
+  )
+
+
+if (nrow(missing_mapped_columns) > 0L) {
+
+  print(
+    missing_mapped_columns,
+    n = Inf
+  )
+
+  stop(
+    paste(
+      "At least one mapped PLFS variable does not exist.",
+      "Correct the source-column name before continuing."
+    )
+  )
+}
+
+
+# ============================================================
+# 6. CREATE EACH ANNUAL ANALYSIS DATASET
+# ============================================================
+
+analysis_results <- imap(
+  outcome_registry,
+  function(item, dataset_name) {
+
+    make_informal_transport(
+      data = item$data,
+      columns = item$columns,
+      dataset_name = dataset_name
+    )
+  }
+)
+
+
+# Save the resulting datasets under their intended object names
+walk2(
+  analysis_results,
+  outcome_registry,
+  function(result, item) {
+
+    assign(
+      x = item$output_name,
+      value = result,
+      envir = .GlobalEnv
+    )
+  }
+)
+
+
+# ============================================================
+# 7. AUDIT THE CREATED OUTCOMES
+# ============================================================
+
+analysis_outcome_audit <- imap_dfr(
+  analysis_results,
+  function(data, dataset_name) {
+
+    tibble(
+      dataset = dataset_name,
+
+      observations = nrow(data),
+
+      transport_workers = sum(
+        data$transport == 1L,
+        na.rm = TRUE
+      ),
+
+      informal_workers = sum(
+        data$informal == 1L,
+        na.rm = TRUE
+      ),
+
+      informal_transport_workers = sum(
+        data$informal_transport == 1L,
+        na.rm = TRUE
+      ),
+
+      transport_unknown = sum(
+        data$transport_unknown == 1L,
+        na.rm = TRUE
+      ),
+
+      informal_unknown = sum(
+        data$informal_unknown == 1L,
+        na.rm = TRUE
+      ),
+
+      informal_transport_unknown = sum(
+        data$informal_transport_unknown == 1L,
+        na.rm = TRUE
+      )
+    )
+  }
+) %>%
+  mutate(
+    transport_rate =
+      transport_workers / observations,
+
+    informal_rate =
+      informal_workers / observations,
+
+    informal_transport_rate =
+      informal_transport_workers / observations,
+
+    transport_unknown_rate =
+      transport_unknown / observations,
+
+    informal_unknown_rate =
+      informal_unknown / observations,
+
+    informal_transport_unknown_rate =
+      informal_transport_unknown / observations
+  )
+
+
+print(
+  analysis_outcome_audit,
+  n = Inf
+)
+
+
+# ============================================================
+# 8. STRICT CHECKS
+# ============================================================
+
+if (any(analysis_outcome_audit$observations == 0L)) {
+
+  stop(
+    "At least one annual analysis dataset has zero observations."
+  )
+}
+
+
+if (any(
+  analysis_outcome_audit$transport_unknown_rate > 0.10,
+  na.rm = TRUE
+)) {
+
+  warning(
+    paste(
+      "At least one year has more than 10% unknown",
+      "transport classifications."
+    )
+  )
+}
+
+
+if (any(
+  analysis_outcome_audit$informal_unknown_rate > 0.10,
+  na.rm = TRUE
+)) {
+
+  warning(
+    paste(
+      "At least one year has more than 10% unknown",
+      "informality classifications."
+    )
+  )
+}
+
+
+message(
+  "Outcome mappings and annual classifications completed."
+)
 ```
+
+
 
 Function for adding state identifiers for diff-in-diff
 ```{r}
-add_district_id <- function(
-    data,
-    state_column,
-    district_column
+# ============================================================
+# 8. IMPORT AND ATTACH PANEL-SPECIFIC DISTRICT INFORMATION
+#
+# Matching hierarchy:
+#
+# 1. Match the state/district code against the correct PLFS
+#    panel lookup.
+#
+# 2. For unmatched P4 codes only, search for the exact same
+#    state and district code in the official 2025 lookup.
+#
+# 3. If still unmatched, retain the panel-specific code and
+#    classify the district name as unresolved.
+#
+# No cross-year harmonised district identifier is created here.
+# ============================================================
+
+library(readxl)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(here)
+library(haven)
+
+
+# ============================================================
+# 8.1 AUTOMATICALLY IMPORT A DISTRICT LOOKUP
+#
+# This detects the row containing the actual column headers.
+# It therefore works whether the workbook has title rows above
+# the table or begins directly with the column headings.
+# ============================================================
+
+read_plfs_district_lookup <- function(
+    path,
+    lookup_name
 ) {
 
-  # Confirm the two columns exist
-  missing_columns <- setdiff(
-    c(state_column, district_column),
-    names(data)
-  )
+  if (!file.exists(path)) {
 
-  if (length(missing_columns) > 0) {
     stop(
       paste(
-        "Missing columns:",
-        paste(missing_columns, collapse = ", ")
+        lookup_name,
+        "was not found at:",
+        path
       )
     )
   }
 
+
+  preview <- read_xlsx(
+    path,
+    col_names = FALSE,
+    n_max = 25,
+    .name_repair = "minimal"
+  )
+
+
+  preview_text <- apply(
+    preview,
+    1,
+    function(row) {
+
+      paste(
+        tolower(
+          trimws(
+            as.character(row)
+          )
+        ),
+        collapse = " | "
+      )
+    }
+  )
+
+
+  # The true header row should mention both state and district
+  possible_header_rows <- which(
+    grepl("state", preview_text) &
+      grepl("district", preview_text)
+  )
+
+
+  if (length(possible_header_rows) == 0L) {
+
+    print(preview)
+
+    stop(
+      paste(
+        "Could not identify the header row in",
+        lookup_name
+      )
+    )
+  }
+
+
+  header_row <- possible_header_rows[1]
+
+
+  lookup_data <- read_xlsx(
+    path,
+    skip = header_row - 1L
+  )
+
+
+  # Remove completely empty columns
+  non_empty_columns <- vapply(
+    lookup_data,
+    function(x) {
+
+      any(
+        !is.na(x) &
+          trimws(
+            as.character(x)
+          ) != ""
+      )
+    },
+    logical(1)
+  )
+
+
+  lookup_data <- lookup_data[
+    ,
+    non_empty_columns,
+    drop = FALSE
+  ]
+
+
+  if (ncol(lookup_data) < 4L) {
+
+    print(
+      names(lookup_data)
+    )
+
+    stop(
+      paste(
+        lookup_name,
+        "contains fewer than four usable columns."
+      )
+    )
+  }
+
+
+  message(
+    lookup_name,
+    ": header detected on row ",
+    header_row,
+    "; imported ",
+    nrow(lookup_data),
+    " rows."
+  )
+
+
+  lookup_data
+}
+
+
+# ============================================================
+# 8.2 IMPORT THE FIVE LOOKUP WORKBOOKS
+# ============================================================
+
+panel1 <- read_plfs_district_lookup(
+  path = here(
+    "Data",
+    "Crosswalks",
+    "PLFS_District_Codes",
+    "17-19.xlsx"
+  ),
+  lookup_name = "Panel 1 lookup"
+)
+
+
+panel2 <- read_plfs_district_lookup(
+  path = here(
+    "Data",
+    "Crosswalks",
+    "PLFS_District_Codes",
+    "19-21.xlsx"
+  ),
+  lookup_name = "Panel 2 lookup"
+)
+
+
+panel3 <- read_plfs_district_lookup(
+  path = here(
+    "Data",
+    "Crosswalks",
+    "PLFS_District_Codes",
+    "21-23.xlsx"
+  ),
+  lookup_name = "Panel 3 lookup"
+)
+
+
+panel4 <- read_plfs_district_lookup(
+  path = here(
+    "Data",
+    "Crosswalks",
+    "PLFS_District_Codes",
+    "23-24.xlsx"
+  ),
+  lookup_name = "Panel 4 lookup"
+)
+
+
+panel2025 <- read_plfs_district_lookup(
+  path = here(
+    "Data",
+    "Crosswalks",
+    "PLFS_District_Codes",
+    "2025.xlsx"
+  ),
+  lookup_name = "2025 lookup"
+)
+
+
+# ============================================================
+# 8.3 CLEAN ONE DISTRICT LOOKUP
+#
+# The function searches the imported column names rather than
+# assuming that the relevant variables are always columns 1–4.
+# ============================================================
+
+prepare_district_lookup <- function(
+    lookup_data,
+    panel_code,
+    lookup_name
+) {
+
+  normalised_column_names <- tolower(
+    gsub(
+      "[^a-z0-9]+",
+      " ",
+      names(lookup_data)
+    )
+  )
+
+
+  state_code_column <- which(
+    grepl("state", normalised_column_names) &
+      grepl("code", normalised_column_names)
+  )
+
+
+  district_code_column <- which(
+    grepl("district", normalised_column_names) &
+      grepl("code", normalised_column_names)
+  )
+
+
+  state_name_column <- which(
+    grepl("state", normalised_column_names) &
+      !grepl("code", normalised_column_names)
+  )
+
+
+  district_name_column <- which(
+    grepl("district", normalised_column_names) &
+      !grepl("code", normalised_column_names)
+  )
+
+
+  # If the names cannot be identified, fall back to the first
+  # four columns in the expected order.
+  if (
+    length(state_code_column) == 0L ||
+      length(state_name_column) == 0L ||
+      length(district_code_column) == 0L ||
+      length(district_name_column) == 0L
+  ) {
+
+    warning(
+      paste(
+        lookup_name,
+        "column names could not be identified automatically;",
+        "using the first four columns."
+      )
+    )
+
+    selected_lookup <- lookup_data[, 1:4]
+
+  } else {
+
+    selected_lookup <- lookup_data[
+      ,
+      c(
+        state_code_column[1],
+        state_name_column[1],
+        district_code_column[1],
+        district_name_column[1]
+      )
+    ]
+  }
+
+
+  names(selected_lookup) <- c(
+    "state_code_source",
+    "State_Name_Panel",
+    "district_code_source",
+    "District_Name_Panel"
+  )
+
+
+  lookup_clean <- selected_lookup %>%
+    mutate(
+      state_code_numeric = clean_code(
+        state_code_source
+      ),
+
+      district_code_numeric = clean_code(
+        district_code_source
+      )
+    ) %>%
+
+    # Remove blank rows, notes and footer text
+    filter(
+      !is.na(state_code_numeric),
+      !is.na(district_code_numeric)
+    )
+
+
+  # ----------------------------------------------------------
+  # Check that codes are whole numbers
+  # ----------------------------------------------------------
+
+  invalid_state_integer <-
+    !is.na(lookup_clean$state_code_numeric) &
+    abs(
+      lookup_clean$state_code_numeric -
+        round(lookup_clean$state_code_numeric)
+    ) > 1e-8
+
+
+  invalid_district_integer <-
+    !is.na(lookup_clean$district_code_numeric) &
+    abs(
+      lookup_clean$district_code_numeric -
+        round(lookup_clean$district_code_numeric)
+    ) > 1e-8
+
+
+  if (any(invalid_state_integer)) {
+
+    stop(
+      paste(
+        lookup_name,
+        "contains non-integer state codes."
+      )
+    )
+  }
+
+
+  if (any(invalid_district_integer)) {
+
+    stop(
+      paste(
+        lookup_name,
+        "contains non-integer district codes."
+      )
+    )
+  }
+
+
+  lookup_clean <- lookup_clean %>%
+    transmute(
+      panel_code = panel_code,
+
+      state_code_std = sprintf(
+        "%02d",
+        as.integer(
+          round(state_code_numeric)
+        )
+      ),
+
+      district_code_std = sprintf(
+        "%03d",
+        as.integer(
+          round(district_code_numeric)
+        )
+      ),
+
+      State_Name_Panel = trimws(
+        gsub(
+          "\\s+",
+          " ",
+          as.character(State_Name_Panel)
+        )
+      ),
+
+      District_Name_Panel = trimws(
+        gsub(
+          "\\s+",
+          " ",
+          as.character(District_Name_Panel)
+        )
+      )
+    )
+
+
+  # ----------------------------------------------------------
+  # Check for missing names
+  # ----------------------------------------------------------
+
+  missing_names <- lookup_clean %>%
+    filter(
+      is.na(State_Name_Panel) |
+        State_Name_Panel == "" |
+        is.na(District_Name_Panel) |
+        District_Name_Panel == ""
+    )
+
+
+  if (nrow(missing_names) > 0L) {
+
+    print(
+      missing_names,
+      n = Inf
+    )
+
+    stop(
+      paste(
+        lookup_name,
+        "contains missing state or district names."
+      )
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # Each code must occur once within the lookup
+  # ----------------------------------------------------------
+
+  duplicate_keys <- lookup_clean %>%
+    count(
+      panel_code,
+      state_code_std,
+      district_code_std,
+      name = "lookup_rows"
+    ) %>%
+
+    filter(
+      lookup_rows > 1L
+    )
+
+
+  if (nrow(duplicate_keys) > 0L) {
+
+    print(
+      duplicate_keys,
+      n = Inf
+    )
+
+    stop(
+      paste(
+        lookup_name,
+        "contains duplicated state-district code keys."
+      )
+    )
+  }
+
+
+  lookup_clean
+}
+
+
+# ============================================================
+# 8.4 PREPARE AND COMBINE THE LOOKUPS
+# ============================================================
+
+district_lookup_p1 <- prepare_district_lookup(
+  lookup_data = panel1,
+  panel_code = "P1",
+  lookup_name = "Panel 1 lookup"
+)
+
+
+district_lookup_p2 <- prepare_district_lookup(
+  lookup_data = panel2,
+  panel_code = "P2",
+  lookup_name = "Panel 2 lookup"
+)
+
+
+district_lookup_p3 <- prepare_district_lookup(
+  lookup_data = panel3,
+  panel_code = "P3",
+  lookup_name = "Panel 3 lookup"
+)
+
+
+district_lookup_p4 <- prepare_district_lookup(
+  lookup_data = panel4,
+  panel_code = "P4",
+  lookup_name = "Panel 4 lookup"
+)
+
+
+district_lookup_2025 <- prepare_district_lookup(
+  lookup_data = panel2025,
+  panel_code = "2025",
+  lookup_name = "2025 lookup"
+)
+
+
+district_lookup_all <- bind_rows(
+  district_lookup_p1,
+  district_lookup_p2,
+  district_lookup_p3,
+  district_lookup_p4,
+  district_lookup_2025
+)
+
+
+# 2025 lookup without panel_code, used only as an exact-code
+# fallback for unmatched P4 observations
+district_lookup_2025_backfill <- district_lookup_2025 %>%
+  select(
+    state_code_std,
+    district_code_std,
+
+    State_Name_2025_Backfill =
+      State_Name_Panel,
+
+    District_Name_2025_Backfill =
+      District_Name_Panel
+  )
+
+
+duplicate_combined_keys <- district_lookup_all %>%
+  count(
+    panel_code,
+    state_code_std,
+    district_code_std,
+    name = "lookup_rows"
+  ) %>%
+
+  filter(
+    lookup_rows > 1L
+  )
+
+
+if (nrow(duplicate_combined_keys) > 0L) {
+
+  print(
+    duplicate_combined_keys,
+    n = Inf
+  )
+
+  stop(
+    "The combined district lookup contains duplicated keys."
+  )
+}
+
+
+district_lookup_audit <- district_lookup_all %>%
+  group_by(
+    panel_code
+  ) %>%
+
+  summarise(
+    states = n_distinct(
+      state_code_std
+    ),
+
+    district_codes = n(),
+
+    .groups = "drop"
+  )
+
+
+print(
+  district_lookup_audit,
+  n = Inf
+)
+
+
+# ============================================================
+# 8.5 CLEAN THE PANEL VARIABLE IN CALENDAR-YEAR 2023
+# ============================================================
+
+clean_person_panel_code <- function(
+    x,
+    dataset_name = "dataset"
+) {
+
+  if (
+    inherits(x, "haven_labelled") ||
+      inherits(x, "labelled")
+  ) {
+
+    labelled_value <- tryCatch(
+      as.character(
+        haven::as_factor(x)
+      ),
+
+      error = function(e) {
+        rep(
+          NA_character_,
+          length(x)
+        )
+      }
+    )
+
+    raw_value <- as.character(
+      haven::zap_labels(x)
+    )
+
+  } else {
+
+    labelled_value <- as.character(x)
+    raw_value <- as.character(x)
+  }
+
+
+  labelled_value <- toupper(
+    trimws(labelled_value)
+  )
+
+  raw_value <- toupper(
+    trimws(raw_value)
+  )
+
+
+  panel_text <- ifelse(
+    !is.na(labelled_value) &
+      labelled_value != "",
+
+    labelled_value,
+
+    raw_value
+  )
+
+
+  panel_clean <- case_when(
+
+    panel_text %in% c(
+      "3",
+      "P3",
+      "PANEL 3",
+      "PANEL3"
+    ) ~
+      "P3",
+
+    panel_text %in% c(
+      "4",
+      "P4",
+      "PANEL 4",
+      "PANEL4"
+    ) ~
+      "P4",
+
+    grepl(
+      "PANEL[[:space:]]*3",
+      panel_text
+    ) ~
+      "P3",
+
+    grepl(
+      "PANEL[[:space:]]*4",
+      panel_text
+    ) ~
+      "P4",
+
+    TRUE ~
+      NA_character_
+  )
+
+
+  invalid_values <-
+    !is.na(panel_text) &
+    panel_text != "" &
+    is.na(panel_clean)
+
+
+  if (any(invalid_values)) {
+
+    cat(
+      "\nUnrecognised panel values in ",
+      dataset_name,
+      ":\n",
+      sep = ""
+    )
+
+    print(
+      unique(
+        panel_text[
+          invalid_values
+        ]
+      )
+    )
+
+    stop(
+      paste(
+        dataset_name,
+        "contains unrecognised panel values."
+      )
+    )
+  }
+
+
+  panel_clean
+}
+
+
+# ============================================================
+# 8.6 ATTACH DISTRICT INFORMATION TO ONE DATASET
+# ============================================================
+
+add_official_district_names <- function(
+    data,
+    state_column,
+    district_column,
+    lookup_data,
+    lookup_2025_backfill,
+    dataset_name = "dataset",
+    fixed_panel = NULL,
+    panel_column = NULL
+) {
+
+  required_columns <- c(
+    state_column,
+    district_column
+  )
+
+
+  if (!is.null(panel_column)) {
+
+    required_columns <- c(
+      required_columns,
+      panel_column
+    )
+  }
+
+
+  missing_columns <- setdiff(
+    required_columns,
+    names(data)
+  )
+
+
+  if (length(missing_columns) > 0L) {
+
+    stop(
+      paste0(
+        dataset_name,
+        " is missing: ",
+        paste(
+          missing_columns,
+          collapse = ", "
+        )
+      )
+    )
+  }
+
+
+  if (
+    is.null(fixed_panel) &&
+      is.null(panel_column)
+  ) {
+
+    stop(
+      paste(
+        dataset_name,
+        "requires either fixed_panel or panel_column."
+      )
+    )
+  }
+
+
+  if (
+    !is.null(fixed_panel) &&
+      !is.null(panel_column)
+  ) {
+
+    stop(
+      paste(
+        dataset_name,
+        "cannot use fixed_panel and panel_column simultaneously."
+      )
+    )
+  }
+
+
+  rows_before <- nrow(data)
+
+
+  # ----------------------------------------------------------
+  # Remove all geographic variables from previous runs
+  # ----------------------------------------------------------
+
+  geographic_variable_pattern <- paste0(
+    "^(",
+    paste(
+      c(
+        "panel_code",
+        "state_code_std",
+        "district_code_std",
+        "district_id_raw",
+        "District_ID_Panel",
+        "State_Name",
+        "District_Name",
+        "State_Name_Panel",
+        "District_Name_Panel",
+        "State_Name_2025_Backfill",
+        "District_Name_2025_Backfill",
+        "State_Name_2025_Candidate",
+        "District_Name_2025_Candidate",
+        "State_Name_Working",
+        "District_Name_Working",
+        "State_Name_Key",
+        "District_Name_Key",
+        "District_ID",
+        "District_Name_Source",
+        "district_lookup_status",
+        "district_lookup_matched",
+        "district_panel_lookup_matched",
+        "district_name_available"
+      ),
+      collapse = "|"
+    ),
+    ")(\\.x|\\.y)?$"
+  )
+
+
+  data <- data %>%
+    select(
+      -matches(
+        geographic_variable_pattern
+      )
+    )
+
+
+  # ----------------------------------------------------------
+  # Clean the person-file codes
+  # ----------------------------------------------------------
 
   state_code <- clean_code(
     data[[state_column]]
@@ -279,128 +2083,1618 @@ add_district_id <- function(
   )
 
 
-  # Standardised versions of the original codes
-  data$state_code_std <- ifelse(
-    is.na(state_code),
-    NA_character_,
-    sprintf("%02d", state_code)
+  invalid_state_integer <-
+    !is.na(state_code) &
+    abs(
+      state_code -
+        round(state_code)
+    ) > 1e-8
+
+
+  invalid_district_integer <-
+    !is.na(district_code) &
+    abs(
+      district_code -
+        round(district_code)
+    ) > 1e-8
+
+
+  if (any(invalid_state_integer)) {
+
+    stop(
+      paste(
+        dataset_name,
+        "contains non-integer state codes."
+      )
+    )
+  }
+
+
+  if (any(invalid_district_integer)) {
+
+    stop(
+      paste(
+        dataset_name,
+        "contains non-integer district codes."
+      )
+    )
+  }
+
+
+  state_code <- as.integer(
+    round(state_code)
   )
 
-  data$district_code_std <- ifelse(
-    is.na(district_code),
-    NA_character_,
-    sprintf("%03d", district_code)
+  district_code <- as.integer(
+    round(district_code)
   )
 
 
-  # Raw state–district identifier
-  data$district_id_raw <- ifelse(
-    is.na(state_code) | is.na(district_code),
+  # ----------------------------------------------------------
+  # Determine each person's PLFS panel
+  # ----------------------------------------------------------
+
+  if (!is.null(fixed_panel)) {
+
+    person_panel <- rep(
+      fixed_panel,
+      nrow(data)
+    )
+
+  } else {
+
+    person_panel <- clean_person_panel_code(
+      data[[panel_column]],
+      dataset_name = dataset_name
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # Construct panel-specific identifiers
+  # ----------------------------------------------------------
+
+  data <- data %>%
+    mutate(
+      .row_order_geography = row_number(),
+
+      panel_code = person_panel,
+
+      state_code_std = if_else(
+        is.na(state_code),
+        NA_character_,
+        sprintf(
+          "%02d",
+          state_code
+        )
+      ),
+
+      district_code_std = if_else(
+        is.na(district_code),
+        NA_character_,
+        sprintf(
+          "%03d",
+          district_code
+        )
+      ),
+
+      district_id_raw = if_else(
+        is.na(state_code_std) |
+          is.na(district_code_std),
+
+        NA_character_,
+
+        paste0(
+          state_code_std,
+          "_",
+          district_code_std
+        )
+      ),
+
+      District_ID_Panel = if_else(
+        is.na(panel_code) |
+          is.na(state_code_std) |
+          is.na(district_code_std),
+
+        NA_character_,
+
+        paste(
+          panel_code,
+          state_code_std,
+          district_code_std,
+          sep = "_"
+        )
+      )
+    )
+
+
+  missing_geography <- data %>%
+    filter(
+      is.na(panel_code) |
+        is.na(state_code_std) |
+        is.na(district_code_std)
+    )
+
+
+  if (nrow(missing_geography) > 0L) {
+
+    print(
+      missing_geography %>%
+        count(
+          panel_code,
+          state_code_std,
+          district_code_std,
+          name = "person_observations"
+        ),
+      n = Inf
+    )
+
+    stop(
+      paste(
+        dataset_name,
+        "contains missing panel, state or district codes."
+      )
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # First join: correct panel-specific lookup
+  # ----------------------------------------------------------
+
+  data <- data %>%
+    left_join(
+      lookup_data,
+      by = c(
+        "panel_code",
+        "state_code_std",
+        "district_code_std"
+      )
+    )
+
+
+  if (nrow(data) != rows_before) {
+
+    stop(
+      paste(
+        dataset_name,
+        "row count changed during the panel lookup join."
+      )
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # Second join: exact-code 2025 fallback
+  #
+  # This fallback is only used when:
+  #
+  #   panel_code == P4
+  #   no Panel 4 name was found
+  #   the exact same state/district code exists in 2025
+  # ----------------------------------------------------------
+
+  data <- data %>%
+    left_join(
+      lookup_2025_backfill,
+      by = c(
+        "state_code_std",
+        "district_code_std"
+      )
+    )
+
+
+  if (nrow(data) != rows_before) {
+
+    stop(
+      paste(
+        dataset_name,
+        "row count changed during the 2025 backfill join."
+      )
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # Classify the source and reliability of the district name
+  # ----------------------------------------------------------
+
+  data <- data %>%
+    mutate(
+      district_lookup_status = case_when(
+
+        !is.na(State_Name_Panel) &
+          !is.na(District_Name_Panel) ~
+          "matched_panel_lookup",
+
+        panel_code == "P4" &
+          is.na(District_Name_Panel) &
+          !is.na(State_Name_2025_Backfill) &
+          !is.na(District_Name_2025_Backfill) ~
+          "backfilled_from_2025_exact_code",
+
+        TRUE ~
+          "unresolved"
+      ),
+
+
+      State_Name = case_when(
+
+        district_lookup_status ==
+          "matched_panel_lookup" ~
+          State_Name_Panel,
+
+        district_lookup_status ==
+          "backfilled_from_2025_exact_code" ~
+          State_Name_2025_Backfill,
+
+        TRUE ~
+          NA_character_
+      ),
+
+
+      District_Name = case_when(
+
+        district_lookup_status ==
+          "matched_panel_lookup" ~
+          District_Name_Panel,
+
+        district_lookup_status ==
+          "backfilled_from_2025_exact_code" ~
+          District_Name_2025_Backfill,
+
+        TRUE ~
+          NA_character_
+      ),
+
+
+      District_Name_Source = case_when(
+
+        district_lookup_status ==
+          "matched_panel_lookup" ~
+          paste0(
+            panel_code,
+            " panel lookup"
+          ),
+
+        district_lookup_status ==
+          "backfilled_from_2025_exact_code" ~
+          "2025 exact-code backfill",
+
+        TRUE ~
+          "unresolved"
+      ),
+
+
+      # Direct panel match only
+      district_panel_lookup_matched =
+        as.integer(
+          district_lookup_status ==
+            "matched_panel_lookup"
+        ),
+
+
+      # A usable name is available either directly or by backfill
+      district_lookup_matched =
+        as.integer(
+          district_lookup_status !=
+            "unresolved"
+        ),
+
+
+      district_name_available =
+        as.integer(
+          !is.na(State_Name) &
+            !is.na(District_Name)
+        )
+    )
+
+
+  # ----------------------------------------------------------
+  # Unmatched codes outside P4 indicate a genuine error
+  # ----------------------------------------------------------
+
+  unexpected_unresolved <- data %>%
+    filter(
+      district_lookup_status == "unresolved",
+      panel_code != "P4"
+    ) %>%
+
+    count(
+      panel_code,
+      state_code_std,
+      district_code_std,
+      District_ID_Panel,
+      name = "person_observations"
+    )
+
+
+  if (nrow(unexpected_unresolved) > 0L) {
+
+    print(
+      unexpected_unresolved,
+      n = Inf
+    )
+
+    stop(
+      paste(
+        dataset_name,
+        "contains unresolved district codes outside Panel 4."
+      )
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # P4 unresolved codes are retained and reported
+  # ----------------------------------------------------------
+
+  unresolved_p4 <- data %>%
+    filter(
+      district_lookup_status == "unresolved",
+      panel_code == "P4"
+    ) %>%
+
+    count(
+      panel_code,
+      state_code_std,
+      district_code_std,
+      District_ID_Panel,
+      name = "person_observations"
+    ) %>%
+
+    arrange(
+      state_code_std,
+      district_code_std
+    )
+
+
+  if (nrow(unresolved_p4) > 0L) {
+
+    cat(
+      "\nUnresolved Panel 4 district codes in ",
+      dataset_name,
+      ":\n",
+      sep = ""
+    )
+
+    print(
+      unresolved_p4,
+      n = Inf
+    )
+
+    warning(
+      paste(
+        dataset_name,
+        "contains unresolved Panel 4 district codes.",
+        "They were retained with missing district names."
+      )
+    )
+  }
+
+
+  data <- data %>%
+    arrange(
+      .row_order_geography
+    ) %>%
+
+    select(
+      -.row_order_geography
+    )
+
+
+  if (nrow(data) != rows_before) {
+
+    stop(
+      paste(
+        dataset_name,
+        "row count changed while attaching district information."
+      )
+    )
+  }
+
+
+  data
+}
+
+
+# ============================================================
+# 8.7 MAP EACH ANALYSIS DATASET TO ITS PANEL
+# ============================================================
+
+district_registry <- list(
+  `2017-18` = list(
+    object_name = "analysis17_18",
+    state_column = "state_per_fv",
+    district_column = "b1q4_per_fv",
+    fixed_panel = "P1",
+    panel_column = NULL
+  ),
+
+  `2018-19` = list(
+    object_name = "analysis18_19",
+    state_column = "state_per_fv",
+    district_column = "b1q4_per_fv",
+    fixed_panel = "P1",
+    panel_column = NULL
+  ),
+
+  `2019-20` = list(
+    object_name = "analysis19_20",
+    state_column = "state_per_fv",
+    district_column = "b1q4_per_fv",
+    fixed_panel = "P2",
+    panel_column = NULL
+  ),
+
+  `2020-21` = list(
+    object_name = "analysis20_21",
+    state_column = "state_perv1",
+    district_column = "distcode_perv1",
+    fixed_panel = "P2",
+    panel_column = NULL
+  ),
+
+  `2022` = list(
+    object_name = "analysis22",
+    state_column = "state_cperv1",
+    district_column = "distcode_cperv1",
+    fixed_panel = "P3",
+    panel_column = NULL
+  ),
+
+  # Calendar-year 2023 contains both P3 and P4 observations
+  `2023` = list(
+    object_name = "analysis23",
+    state_column = "state_cperv1",
+    district_column = "distcode_cperv1",
+    fixed_panel = NULL,
+    panel_column = "panel_cperv1"
+  ),
+
+  `2024` = list(
+    object_name = "analysis24",
+    state_column = "State_UT_Code",
+    district_column = "District_Code",
+    fixed_panel = "P4",
+    panel_column = NULL
+  ),
+
+  `2025` = list(
+    object_name = "analysis25",
+    state_column = "st",
+    district_column = "dc",
+    fixed_panel = "2025",
+    panel_column = NULL
+  )
+)
+
+
+if (exists(
+  "analysis21_22",
+  envir = .GlobalEnv
+)) {
+
+  district_registry <- append(
+    district_registry,
+
+    list(
+      `2021-22` = list(
+        object_name = "analysis21_22",
+        state_column = "state_perv1",
+        district_column = "distcode_perv1",
+        fixed_panel = "P3",
+        panel_column = NULL
+      )
+    ),
+
+    after = 4L
+  )
+}
+
+
+# ============================================================
+# 8.8 CHECK DATASETS AND SOURCE VARIABLES
+# ============================================================
+
+district_mapping_audit <- imap_dfr(
+  district_registry,
+  function(item, dataset_name) {
+
+    object_exists <- exists(
+      item$object_name,
+      envir = .GlobalEnv
+    )
+
+
+    if (object_exists) {
+
+      current_data <- get(
+        item$object_name,
+        envir = .GlobalEnv
+      )
+
+      state_column_exists <-
+        item$state_column %in%
+        names(current_data)
+
+      district_column_exists <-
+        item$district_column %in%
+        names(current_data)
+
+      panel_column_exists <-
+        is.null(item$panel_column) ||
+        item$panel_column %in%
+          names(current_data)
+
+    } else {
+
+      state_column_exists <- FALSE
+      district_column_exists <- FALSE
+      panel_column_exists <- FALSE
+    }
+
+
+    tibble(
+      dataset = dataset_name,
+      object_name = item$object_name,
+      object_exists = object_exists,
+      state_column = item$state_column,
+      state_column_exists = state_column_exists,
+      district_column = item$district_column,
+      district_column_exists = district_column_exists,
+
+      fixed_panel = ifelse(
+        is.null(item$fixed_panel),
+        NA_character_,
+        item$fixed_panel
+      ),
+
+      panel_column = ifelse(
+        is.null(item$panel_column),
+        NA_character_,
+        item$panel_column
+      ),
+
+      panel_column_exists = panel_column_exists
+    )
+  }
+)
+
+
+print(
+  district_mapping_audit,
+  n = Inf
+)
+
+
+invalid_mappings <- district_mapping_audit %>%
+  filter(
+    !object_exists |
+      !state_column_exists |
+      !district_column_exists |
+      !panel_column_exists
+  )
+
+
+if (nrow(invalid_mappings) > 0L) {
+
+  print(
+    invalid_mappings,
+    n = Inf
+  )
+
+  stop(
+    "At least one dataset or geographic source variable is missing."
+  )
+}
+
+
+# ============================================================
+# 8.9 APPLY THE LOOKUPS ONE DATASET AT A TIME
+#
+# gc() is run between years to reduce memory pressure.
+# ============================================================
+
+for (dataset_name in names(district_registry)) {
+
+  item <- district_registry[[dataset_name]]
+
+
+  message(
+    "Processing district information for ",
+    dataset_name,
+    "..."
+  )
+
+
+  current_data <- get(
+    item$object_name,
+    envir = .GlobalEnv
+  )
+
+
+  updated_data <- add_official_district_names(
+    data = current_data,
+    state_column = item$state_column,
+    district_column = item$district_column,
+    lookup_data = district_lookup_all,
+    lookup_2025_backfill =
+      district_lookup_2025_backfill,
+    dataset_name = dataset_name,
+    fixed_panel = item$fixed_panel,
+    panel_column = item$panel_column
+  )
+
+
+  assign(
+    item$object_name,
+    updated_data,
+    envir = .GlobalEnv
+  )
+
+
+  rm(
+    current_data,
+    updated_data
+  )
+
+  gc()
+
+
+  message(
+    "Finished ",
+    dataset_name
+  )
+}
+
+
+# ============================================================
+# 8.10 AUDIT THE RESULTS
+# ============================================================
+
+district_id_audit <- imap_dfr(
+  district_registry,
+  function(item, dataset_name) {
+
+    current_data <- get(
+      item$object_name,
+      envir = .GlobalEnv
+    )
+
+
+    current_data %>%
+      group_by(
+        panel_code
+      ) %>%
+
+      summarise(
+        dataset = dataset_name,
+
+        observations = n(),
+
+        unique_states = n_distinct(
+          state_code_std
+        ),
+
+        unique_panel_districts = n_distinct(
+          District_ID_Panel
+        ),
+
+        matched_panel_observations = sum(
+          district_lookup_status ==
+            "matched_panel_lookup"
+        ),
+
+        backfilled_observations = sum(
+          district_lookup_status ==
+            "backfilled_from_2025_exact_code"
+        ),
+
+        unresolved_observations = sum(
+          district_lookup_status ==
+            "unresolved"
+        ),
+
+        .groups = "drop"
+      ) %>%
+
+      select(
+        dataset,
+        everything()
+      )
+  }
+)
+
+
+print(
+  district_id_audit,
+  n = Inf
+)
+
+
+# ============================================================
+# 8.11 CREATE A UNIQUE DISTRICT INVENTORY
+# ============================================================
+
+district_inventory_by_year <- imap_dfr(
+  district_registry,
+  function(item, dataset_name) {
+
+    current_data <- get(
+      item$object_name,
+      envir = .GlobalEnv
+    )
+
+
+    current_data %>%
+      count(
+        panel_code,
+        state_code_std,
+        district_code_std,
+        District_ID_Panel,
+        State_Name,
+        District_Name,
+        District_Name_Source,
+        district_lookup_status,
+        name = "person_observations"
+      ) %>%
+
+      mutate(
+        dataset = dataset_name,
+        .before = 1
+      )
+  }
+) %>%
+
+  arrange(
+    factor(
+      dataset,
+      levels = names(
+        district_registry
+      )
+    ),
+    panel_code,
+    state_code_std,
+    district_code_std
+  )
+
+
+# Separate table containing only unresolved districts
+unresolved_district_inventory <- district_inventory_by_year %>%
+  filter(
+    district_lookup_status ==
+      "unresolved"
+  )
+
+
+print(
+  unresolved_district_inventory,
+  n = Inf
+)
+
+
+# ============================================================
+# 8.12 FINAL CHECKS
+# ============================================================
+
+missing_panel_ids <- imap_int(
+  district_registry,
+  function(item, dataset_name) {
+
+    current_data <- get(
+      item$object_name,
+      envir = .GlobalEnv
+    )
+
+    sum(
+      is.na(
+        current_data$District_ID_Panel
+      )
+    )
+  }
+)
+
+
+if (any(missing_panel_ids > 0L)) {
+
+  stop(
+    "At least one observation has a missing panel-specific district ID."
+  )
+}
+
+
+total_unresolved <- sum(
+  district_id_audit$unresolved_observations
+)
+
+
+if (total_unresolved > 0L) {
+
+  warning(
+    paste(
+      total_unresolved,
+      "person observations have unresolved district names.",
+      "Their District_ID_Panel values were retained."
+    )
+  )
+}
+
+
+message(
+  paste(
+    "Panel-specific district information attached.",
+    "Unmatched P4 codes were backfilled from the exact 2025",
+    "state-district code where possible."
+  )
+)
+```
+
+Qurter and month insertion:
+```{r}
+# ============================================================
+# Validate a scalar calendar year
+# ============================================================
+
+validate_calendar_year <- function(x, argument_name = "calendar_year") {
+
+  if (length(x) != 1L) {
+    stop(
+      argument_name,
+      " must contain exactly one value."
+    )
+  }
+
+  year <- suppressWarnings(
+    as.integer(x)
+  )
+
+  if (
+    is.na(year) ||
+    year < 1900L ||
+    year > 2100L
+  ) {
+    stop(
+      argument_name,
+      " must be a valid four-digit year."
+    )
+  }
+
+  year
+}
+
+
+# ============================================================
+# Strictly extract PLFS quarter codes Q1-Q8
+# ============================================================
+
+get_plfs_quarter_number <- function(
+    x,
+    strict = TRUE
+) {
+
+  is_labelled <- (
+    inherits(x, "haven_labelled") ||
+    inherits(x, "labelled")
+  )
+
+  # Use labels where available, but retain unlabelled values
+  if (is_labelled) {
+
+    text_value <- as.character(
+      haven::as_factor(
+        x,
+        levels = "default"
+      )
+    )
+
+    raw_value <- haven::zap_labels(x)
+
+  } else {
+
+    text_value <- as.character(x)
+    raw_value <- x
+  }
+
+
+  text_value <- toupper(
+    trimws(text_value)
+  )
+
+
+  quarter_number <- rep(
+    NA_integer_,
+    length(text_value)
+  )
+
+
+  # Accept exact values such as Q1, Q2, ..., Q8
+  q_format <- grepl(
+    "^Q\\s*[1-8]$",
+    text_value
+  )
+
+  quarter_number[q_format] <- as.integer(
+    sub(
+      "^Q\\s*",
+      "",
+      text_value[q_format]
+    )
+  )
+
+
+  # Also accept exact numeric strings 1, 2, ..., 8
+  numeric_format <- grepl(
+    "^[1-8]$",
+    text_value
+  )
+
+  quarter_number[numeric_format] <- as.integer(
+    text_value[numeric_format]
+  )
+
+
+  # For labelled numeric vectors, use the underlying value
+  # when the displayed label could not be parsed
+  raw_number <- suppressWarnings(
+    as.integer(
+      as.character(raw_value)
+    )
+  )
+
+  use_raw_number <- (
+    is.na(quarter_number) &
+    raw_number %in% 1:8
+  )
+
+  quarter_number[use_raw_number] <- raw_number[use_raw_number]
+
+
+  # Detect nonmissing values that could not be parsed
+  invalid_value <- (
+    !is.na(text_value) &
+    nzchar(text_value) &
+    is.na(quarter_number)
+  )
+
+
+  if (any(invalid_value)) {
+
+    examples <- paste(
+      utils::head(
+        unique(text_value[invalid_value]),
+        5L
+      ),
+      collapse = ", "
+    )
+
+    message <- paste0(
+      "Unrecognised PLFS quarter values: ",
+      examples
+    )
+
+    if (strict) {
+      stop(message)
+    } else {
+      warning(
+        message,
+        call. = FALSE
+      )
+    }
+  }
+
+
+  quarter_number
+}
+
+
+# ============================================================
+# Extract month numbers 1-12
+#
+# Accepts:
+# 1, 01, M1, M01, January, Jan, etc.
+# ============================================================
+
+get_plfs_month_number <- function(
+    x,
+    strict = TRUE
+) {
+
+  is_labelled <- (
+    inherits(x, "haven_labelled") ||
+    inherits(x, "labelled")
+  )
+
+  if (is_labelled) {
+
+    text_value <- as.character(
+      haven::as_factor(
+        x,
+        levels = "default"
+      )
+    )
+
+    raw_value <- haven::zap_labels(x)
+
+  } else {
+
+    text_value <- as.character(x)
+    raw_value <- x
+  }
+
+
+  text_value <- toupper(
+    trimws(text_value)
+  )
+
+
+  month_number <- rep(
+    NA_integer_,
+    length(text_value)
+  )
+
+
+  # Numeric month: 1, 01, ..., 12
+  numeric_format <- grepl(
+    "^(0?[1-9]|1[0-2])$",
+    text_value
+  )
+
+  month_number[numeric_format] <- as.integer(
+    text_value[numeric_format]
+  )
+
+
+  # M1, M01, ..., M12
+  m_format <- grepl(
+    "^M\\s*(0?[1-9]|1[0-2])$",
+    text_value
+  )
+
+  month_number[m_format] <- as.integer(
+    sub(
+      "^M\\s*",
+      "",
+      text_value[m_format]
+    )
+  )
+
+
+  # Full and abbreviated English month names
+  month_lookup <- c(
+    setNames(1:12, toupper(month.name)),
+    setNames(1:12, toupper(month.abb))
+  )
+
+  named_month <- match(
+    text_value,
+    names(month_lookup)
+  )
+
+  use_named_month <- (
+    is.na(month_number) &
+    !is.na(named_month)
+  )
+
+  month_number[use_named_month] <- unname(
+    month_lookup[named_month[use_named_month]]
+  )
+
+
+  # Underlying numeric fallback
+  raw_number <- suppressWarnings(
+    as.integer(
+      as.character(raw_value)
+    )
+  )
+
+  use_raw_number <- (
+    is.na(month_number) &
+    raw_number %in% 1:12
+  )
+
+  month_number[use_raw_number] <- raw_number[use_raw_number]
+
+
+  invalid_value <- (
+    !is.na(text_value) &
+    nzchar(text_value) &
+    is.na(month_number)
+  )
+
+
+  if (any(invalid_value)) {
+
+    examples <- paste(
+      utils::head(
+        unique(text_value[invalid_value]),
+        5L
+      ),
+      collapse = ", "
+    )
+
+    message <- paste0(
+      "Unrecognised PLFS month values: ",
+      examples
+    )
+
+    if (strict) {
+      stop(message)
+    } else {
+      warning(
+        message,
+        call. = FALSE
+      )
+    }
+  }
+
+
+  month_number
+}
+
+
+# ============================================================
+# Legacy Q1-Q8 to calendar quarter
+# ============================================================
+
+convert_legacy_quarter <- function(q_number) {
+
+  calendar_quarter <- rep(
+    NA_integer_,
+    length(q_number)
+  )
+
+  calendar_quarter[q_number %in% c(1L, 5L)] <- 3L
+  calendar_quarter[q_number %in% c(2L, 6L)] <- 4L
+  calendar_quarter[q_number %in% c(3L, 7L)] <- 1L
+  calendar_quarter[q_number %in% c(4L, 8L)] <- 2L
+
+  calendar_quarter
+}
+
+
+# ============================================================
+# Add common timestamp variables
+# ============================================================
+
+finalise_plfs_time <- function(
+    data,
+    calendar_year,
+    calendar_quarter,
+    survey_month = NULL,
+    plfs_quarter_code = NULL
+) {
+
+  number_of_rows <- nrow(data)
+
+
+  calendar_year <- rep_len(
+    as.integer(calendar_year),
+    number_of_rows
+  )
+
+  calendar_quarter <- rep_len(
+    as.integer(calendar_quarter),
+    number_of_rows
+  )
+
+
+  if (is.null(survey_month)) {
+
+    survey_month <- rep(
+      NA_integer_,
+      number_of_rows
+    )
+
+  } else {
+
+    survey_month <- rep_len(
+      as.integer(survey_month),
+      number_of_rows
+    )
+  }
+
+
+  if (is.null(plfs_quarter_code)) {
+
+    plfs_quarter_code <- rep(
+      NA_integer_,
+      number_of_rows
+    )
+
+  } else {
+
+    plfs_quarter_code <- rep_len(
+      as.integer(plfs_quarter_code),
+      number_of_rows
+    )
+  }
+
+
+  invalid_quarter <- (
+    !is.na(calendar_quarter) &
+    !(calendar_quarter %in% 1:4)
+  )
+
+  if (any(invalid_quarter)) {
+    stop(
+      "Calendar quarter must be between 1 and 4."
+    )
+  }
+
+
+  invalid_month <- (
+    !is.na(survey_month) &
+    !(survey_month %in% 1:12)
+  )
+
+  if (any(invalid_month)) {
+    stop(
+      "Survey month must be between 1 and 12."
+    )
+  }
+
+
+  # Check that month and quarter agree
+  quarter_from_month <- rep(
+    NA_integer_,
+    number_of_rows
+  )
+
+  has_month <- !is.na(survey_month)
+
+  quarter_from_month[has_month] <- (
+    (survey_month[has_month] - 1L) %/% 3L
+  ) + 1L
+
+
+  inconsistent_time <- (
+    !is.na(quarter_from_month) &
+    !is.na(calendar_quarter) &
+    quarter_from_month != calendar_quarter
+  )
+
+  if (any(inconsistent_time)) {
+    stop(
+      "Survey month and calendar quarter disagree."
+    )
+  }
+
+
+  data$calendar_year <- calendar_year
+  data$calendar_quarter <- calendar_quarter
+  data$survey_month <- survey_month
+  data$plfs_quarter_code <- plfs_quarter_code
+
+
+  # First month of the quarter.
+  # This is not necessarily the actual survey month.
+  data$quarter_start_month <- rep(
+    NA_integer_,
+    number_of_rows
+  )
+
+  valid_quarter <- (
+    !is.na(calendar_year) &
+    !is.na(calendar_quarter)
+  )
+
+  data$quarter_start_month[valid_quarter] <- (
+    calendar_quarter[valid_quarter] - 1L
+  ) * 3L + 1L
+
+
+  data$year_quarter <- rep(
     NA_character_,
-    paste0(
-      data$state_code_std,
-      "_",
-      data$district_code_std
+    number_of_rows
+  )
+
+  data$year_quarter[valid_quarter] <- sprintf(
+    "%04d_Q%d",
+    calendar_year[valid_quarter],
+    calendar_quarter[valid_quarter]
+  )
+
+
+  # Continuous quarterly index
+  data$quarter_id <- rep(
+    NA_integer_,
+    number_of_rows
+  )
+
+  data$quarter_id[valid_quarter] <- as.integer(
+    calendar_year[valid_quarter] * 4L +
+      calendar_quarter[valid_quarter] -
+      1L
+  )
+
+
+  data$quarter_start_date <- rep(
+    as.Date(NA),
+    number_of_rows
+  )
+
+  data$quarter_start_date[valid_quarter] <- as.Date(
+    sprintf(
+      "%04d-%02d-01",
+      calendar_year[valid_quarter],
+      data$quarter_start_month[valid_quarter]
+    )
+  )
+
+
+  valid_month <- (
+    !is.na(calendar_year) &
+    !is.na(survey_month)
+  )
+
+
+  data$year_month <- rep(
+    NA_character_,
+    number_of_rows
+  )
+
+  data$year_month[valid_month] <- sprintf(
+    "%04d_%02d",
+    calendar_year[valid_month],
+    survey_month[valid_month]
+  )
+
+
+  data$month_id <- rep(
+    NA_integer_,
+    number_of_rows
+  )
+
+  data$month_id[valid_month] <- as.integer(
+    calendar_year[valid_month] * 12L +
+      survey_month[valid_month] -
+      1L
+  )
+
+
+  data$month_start_date <- rep(
+    as.Date(NA),
+    number_of_rows
+  )
+
+  data$month_start_date[valid_month] <- as.Date(
+    sprintf(
+      "%04d-%02d-01",
+      calendar_year[valid_month],
+      survey_month[valid_month]
     )
   )
 
 
   data
 }
+
+
+# ============================================================
+# July-June annual PLFS files
+# ============================================================
+
+add_annual_quarter <- function(
+    data,
+    quarter_column,
+    start_year
+) {
+
+  if (!(quarter_column %in% names(data))) {
+    stop(
+      "Quarter column not found: ",
+      quarter_column
+    )
+  }
+
+  start_year <- validate_calendar_year(
+    start_year,
+    "start_year"
+  )
+
+
+  plfs_quarter_code <- get_plfs_quarter_number(
+    data[[quarter_column]]
+  )
+
+
+  calendar_quarter <- convert_legacy_quarter(
+    plfs_quarter_code
+  )
+
+
+  calendar_year <- rep(
+    NA_integer_,
+    length(plfs_quarter_code)
+  )
+
+
+  first_half <- plfs_quarter_code %in% c(
+    1L, 2L, 5L, 6L
+  )
+
+  second_half <- plfs_quarter_code %in% c(
+    3L, 4L, 7L, 8L
+  )
+
+
+  calendar_year[first_half] <- start_year
+  calendar_year[second_half] <- start_year + 1L
+
+
+  finalise_plfs_time(
+    data = data,
+    calendar_year = calendar_year,
+    calendar_quarter = calendar_quarter,
+    plfs_quarter_code = plfs_quarter_code
+  )
+}
+
+
+# ============================================================
+# Legacy calendar-year PLFS files
+# ============================================================
+
+add_calendar_year_quarter <- function(
+    data,
+    quarter_column,
+    calendar_year
+) {
+
+  if (!(quarter_column %in% names(data))) {
+    stop(
+      "Quarter column not found: ",
+      quarter_column
+    )
+  }
+
+  calendar_year <- validate_calendar_year(
+    calendar_year
+  )
+
+
+  plfs_quarter_code <- get_plfs_quarter_number(
+    data[[quarter_column]]
+  )
+
+
+  calendar_quarter <- convert_legacy_quarter(
+    plfs_quarter_code
+  )
+
+
+  finalise_plfs_time(
+    data = data,
+    calendar_year = calendar_year,
+    calendar_quarter = calendar_quarter,
+    plfs_quarter_code = plfs_quarter_code
+  )
+}
+
+
+# ============================================================
+# Monthly calendar-year data
+#
+# Month is the source of truth.
+# Quarter is derived from month.
+# ============================================================
+
+add_calendar_month <- function(
+    data,
+    month_column,
+    calendar_year,
+    quarter_column = NULL
+) {
+
+  if (!(month_column %in% names(data))) {
+    stop(
+      "Month column not found: ",
+      month_column
+    )
+  }
+
+  calendar_year <- validate_calendar_year(
+    calendar_year
+  )
+
+
+  survey_month <- get_plfs_month_number(
+    data[[month_column]]
+  )
+
+
+  calendar_quarter <- rep(
+    NA_integer_,
+    length(survey_month)
+  )
+
+  valid_month <- !is.na(survey_month)
+
+  calendar_quarter[valid_month] <- (
+    (survey_month[valid_month] - 1L) %/% 3L
+  ) + 1L
+
+
+  plfs_quarter_code <- rep(
+    NA_integer_,
+    length(survey_month)
+  )
+
+
+  # Optionally validate the supplied direct quarter code
+  if (!is.null(quarter_column)) {
+
+    if (!(quarter_column %in% names(data))) {
+      stop(
+        "Quarter column not found: ",
+        quarter_column
+      )
+    }
+
+    plfs_quarter_code <- get_plfs_quarter_number(
+      data[[quarter_column]]
+    )
+
+
+    invalid_direct_quarter <- (
+      !is.na(plfs_quarter_code) &
+      !(plfs_quarter_code %in% 1:4)
+    )
+
+    if (any(invalid_direct_quarter)) {
+      stop(
+        "Monthly-format quarter codes must be Q1-Q4."
+      )
+    }
+
+
+    mismatch <- (
+      !is.na(plfs_quarter_code) &
+      !is.na(calendar_quarter) &
+      plfs_quarter_code != calendar_quarter
+    )
+
+    if (any(mismatch)) {
+      stop(
+        "The supplied month and quarter columns disagree."
+      )
+    }
+  }
+
+
+  finalise_plfs_time(
+    data = data,
+    calendar_year = calendar_year,
+    calendar_quarter = calendar_quarter,
+    survey_month = survey_month,
+    plfs_quarter_code = plfs_quarter_code
+  )
+}
+
+
+# ============================================================
+# 2025 wrapper
+# ============================================================
+
+add_2025_time <- function(
+    data,
+    month_column = "month",
+    quarter_column = "qtr"
+) {
+
+  add_calendar_month(
+    data = data,
+    month_column = month_column,
+    calendar_year = 2025L,
+    quarter_column = quarter_column
+  )
+}
+
+
 ```
 
-Applying the functions to new data frames for diff-in-diff.
-```{r}
-#Create data frames for informal transport for each year
-analysis17_18 <- make_informal_transport(
-  data17_18_fv,
-  columns17
-)
 
-analysis18_19 <- make_informal_transport(
-  data18_19_fv,
-  columns18_19
-)
-
-analysis19_20 <- make_informal_transport(
-  data19_20_fv,
-  columns19_20
-)
-
-analysis20_21 <- make_informal_transport(
-  data20_21_fv,
-  columns20_21
-)
-
-analysis22 <- make_informal_transport(
-  data22,
-  columns22
-)
-
-analysis23 <- make_informal_transport(
-  data23,
-  columns23
-)
-
-analysis24 <- make_informal_transport(
-  data24,
-  columns24
-)
-
-analysis25 <- make_informal_transport(
-  data25,
-  columns25
-)
-
-#Adding unique district identifiers
-analysis17_18 <- add_district_id(
-  analysis17_18,
-  state_column = "state_per_fv",
-  district_column = "b1q4_per_fv"
-)
-
-analysis18_19 <- add_district_id(
-  analysis18_19,
-  state_column = "state_per_fv",
-  district_column = "b1q4_per_fv"
-)
-
-analysis19_20 <- add_district_id(
-  analysis19_20,
-  state_column = "state_per_fv",
-  district_column = "b1q4_per_fv"
-)
-
-analysis20_21 <- add_district_id(
-  analysis20_21,
-  state_column = "state_perv1",
-  district_column = "distcode_perv1"
-)
-
-analysis22 <- add_district_id(
-  analysis22,
-  state_column = "state_cperv1",
-  district_column = "distcode_cperv1"
-)
-
-analysis23 <- add_district_id(
-  analysis23,
-  state_column = "state_cperv1",
-  district_column = "distcode_cperv1"
-)
-
-analysis24 <- add_district_id(
-  analysis24,
-  state_column = "State_UT_Code",
-  district_column = "District_Code"
-)
-
-analysis25 <- add_district_id(
-  analysis25,
-  state_column = "st",
-  district_column = "dc"
-)
-```
 
 Functions for quarter and year identifiers, so they can be in chronological order.
 ```{r}
@@ -708,6 +4002,14 @@ analysis25 <- add_2025_quarter(
   quarter_column = "qtr"
 )
 ```
+
+
+Combining all the above into one CSV file so that I don't have to load the whole thing every single time:
+```{r}
+
+```
+
+
 
 Metro binary and urban binary
 ```{r}
@@ -2610,741 +5912,5 @@ if (nrow(metro_reversal_check) > 0) {
 ```
 
 
-
-Confirm Metro indicators added after time
-```{r}
-# ============================================================
-# Combine all annual analysis datasets into one
-# individual-level repeated-cross-section DiD dataset
-# ============================================================
-
-library(dplyr)
-library(stringr)
-library(tibble)
-
-
-# ============================================================
-# 1. Confirm that metro indicators were added after time
-# ============================================================
-
-required_final_variables <- c(
-  "year",
-  "quarter",
-  "year_quarter",
-  "period_index",
-  "state_code_std",
-  "district_code_std",
-  "district_id_raw",
-  "district_name",
-  "district_name_key",
-  "urban",
-  "rural",
-  "has_metro",
-  "metro_urban",
-  "metro_opened_this_quarter",
-  "metro_start_period_index",
-  "transport",
-  "informal",
-  "informal_transport",
-  "informal_unknown"
-)
-
-
-check_final_variables <- function(
-    data,
-    dataset_name
-) {
-
-  missing_variables <- setdiff(
-    required_final_variables,
-    names(data)
-  )
-
-  if (length(missing_variables) > 0) {
-    stop(
-      paste0(
-        dataset_name,
-        " is missing: ",
-        paste(
-          missing_variables,
-          collapse = ", "
-        ),
-        "\n\nMake sure the quarter/year functions are run before ",
-        "attach_official_district_name() and add_metro_flag()."
-      )
-    )
-  }
-
-  message(
-    dataset_name,
-    ": required variables found."
-  )
-}
-
-
-check_final_variables(
-  analysis17_18,
-  "2017-18"
-)
-
-check_final_variables(
-  analysis18_19,
-  "2018-19"
-)
-
-check_final_variables(
-  analysis19_20,
-  "2019-20"
-)
-
-check_final_variables(
-  analysis20_21,
-  "2020-21"
-)
-
-check_final_variables(
-  analysis22,
-  "2022"
-)
-
-check_final_variables(
-  analysis23,
-  "2023"
-)
-
-check_final_variables(
-  analysis24,
-  "2024"
-)
-
-check_final_variables(
-  analysis25,
-  "2025"
-)
-```
-```{r}
-# ============================================================
-# 2. Find the first available variable from a list
-# ============================================================
-
-find_first_existing <- function(
-    data,
-    candidates,
-    variable_description,
-    dataset_name
-) {
-
-  existing_variables <- candidates[
-    candidates %in% names(data)
-  ]
-
-  if (length(existing_variables) == 0) {
-    stop(
-      paste0(
-        dataset_name,
-        ": could not find ",
-        variable_description,
-        ".\nChecked: ",
-        paste(
-          candidates,
-          collapse = ", "
-        )
-      )
-    )
-  }
-
-  existing_variables[1]
-}
-
-
-# ============================================================
-# Extract an optional variable or return missing values
-# ============================================================
-
-get_optional_character <- function(
-    data,
-    variable_name
-) {
-
-  if (variable_name %in% names(data)) {
-    return(
-      as.character(
-        data[[variable_name]]
-      )
-    )
-  }
-
-  rep(
-    NA_character_,
-    nrow(data)
-  )
-}
-
-
-get_optional_integer <- function(
-    data,
-    variable_name
-) {
-
-  if (variable_name %in% names(data)) {
-    return(
-      as.integer(
-        clean_code(
-          data[[variable_name]]
-        )
-      )
-    )
-  }
-
-  rep(
-    NA_integer_,
-    nrow(data)
-  )
-}
-```
-
-```{r}
-# ============================================================
-# 3. Retain and rename only the DiD variables
-# ============================================================
-
-prepare_did_dataset <- function(
-    data,
-    dataset_name,
-    age_candidates,
-    education_candidates,
-    weight_candidates
-) {
-
-  # Find the age variable
-  age_variable <- find_first_existing(
-    data = data,
-    candidates = age_candidates,
-    variable_description = "age",
-    dataset_name = dataset_name
-  )
-
-
-  # Find the education variable
-  education_variable <- find_first_existing(
-    data = data,
-    candidates = education_candidates,
-    variable_description = "general education level",
-    dataset_name = dataset_name
-  )
-
-
-  # Find the survey-weight variable
-  weight_variable <- find_first_existing(
-    data = data,
-    candidates = weight_candidates,
-    variable_description = "survey multiplier",
-    dataset_name = dataset_name
-  )
-
-
-  # Create a stable district identifier using the official
-  # state code and harmonised district name.
-  #
-  # district_id_raw is retained separately for auditing.
-  stable_district_id <- ifelse(
-    is.na(data$state_code_std) |
-      is.na(data$district_name_key),
-
-    as.character(
-      data$district_id_raw
-    ),
-
-    paste0(
-      as.character(
-        data$state_code_std
-      ),
-      "_",
-      str_replace_all(
-        as.character(
-          data$district_name_key
-        ),
-        " ",
-        "_"
-      )
-    )
-  )
-
-
-  compact_data <- tibble(
-    # --------------------------------------------------------
-    # Source
-    # --------------------------------------------------------
-
-    source_dataset =
-      dataset_name,
-
-
-    # --------------------------------------------------------
-    # Time
-    # --------------------------------------------------------
-
-    year = as.integer(
-      data$year
-    ),
-
-    quarter = as.integer(
-      data$quarter
-    ),
-
-    year_quarter = as.character(
-      data$year_quarter
-    ),
-
-    period_index = as.integer(
-      data$period_index
-    ),
-
-
-    # --------------------------------------------------------
-    # Geography
-    # --------------------------------------------------------
-
-    state_code = as.character(
-      data$state_code_std
-    ),
-
-    district_code_raw = as.character(
-      data$district_code_std
-    ),
-
-    district_id_raw = as.character(
-      data$district_id_raw
-    ),
-
-    district_name = as.character(
-      data$district_name
-    ),
-
-    district_name_key = as.character(
-      data$district_name_key
-    ),
-
-    district_id = as.character(
-      stable_district_id
-    ),
-
-
-    # --------------------------------------------------------
-    # Controls
-    # --------------------------------------------------------
-
-    age = as.numeric(
-      clean_code(
-        data[[age_variable]]
-      )
-    ),
-
-    education_level = as.numeric(
-      clean_code(
-        data[[education_variable]]
-      )
-    ),
-
-
-    # --------------------------------------------------------
-    # PLFS survey weight
-    # --------------------------------------------------------
-
-    survey_weight = as.numeric(
-      clean_code(
-        data[[weight_variable]]
-      )
-    ),
-
-
-    # --------------------------------------------------------
-    # Urban/rural indicators
-    # --------------------------------------------------------
-
-    urban = as.integer(
-      data$urban
-    ),
-
-    rural = as.integer(
-      data$rural
-    ),
-
-
-    # --------------------------------------------------------
-    # Metro treatment variables
-    # --------------------------------------------------------
-
-    has_metro = as.integer(
-      data$has_metro
-    ),
-
-    metro_urban = as.integer(
-      data$metro_urban
-    ),
-
-    metro_opened_this_quarter = as.integer(
-      data$metro_opened_this_quarter
-    ),
-
-    metro_start_period_index = as.integer(
-      data$metro_start_period_index
-    ),
-
-    metro_pre_sample = get_optional_integer(
-      data,
-      "metro_pre_sample"
-    ),
-
-    metro_system = get_optional_character(
-      data,
-      "metro_system"
-    ),
-
-    metro_opening_year = get_optional_integer(
-      data,
-      "metro_opening_year"
-    ),
-
-    metro_opening_quarter = get_optional_integer(
-      data,
-      "metro_opening_quarter"
-    ),
-
-    metro_manual_review = get_optional_integer(
-      data,
-      "metro_manual_review"
-    ),
-
-
-    # --------------------------------------------------------
-    # Outcomes
-    # --------------------------------------------------------
-
-    transport = as.integer(
-      data$transport
-    ),
-
-    informal_transport = as.integer(
-      data$informal_transport
-    ),
-
-    informal = as.integer(
-      data$informal
-    ),
-
-    informal_unknown = as.integer(
-      data$informal_unknown
-    )
-  )
-
-
-  # Confirm that no observations were removed
-  if (nrow(compact_data) != nrow(data)) {
-    stop(
-      paste0(
-        dataset_name,
-        ": row count changed during harmonisation."
-      )
-    )
-  }
-
-
-  compact_data
-}
-```
-
-```{r}
-# ============================================================
-# 4. Create compact annual DiD datasets
-# ============================================================
-
-did17_18 <- prepare_did_dataset(
-  data = analysis17_18,
-  dataset_name = "2017-18",
-
-  age_candidates = c(
-    "b4q6_per_fv"
-  ),
-
-  education_candidates = c(
-    "b4q8_per_fv"
-  ),
-
-  weight_candidates = c(
-    "MULT_per_fv",
-    "mult_per_fv"
-  )
-)
-
-
-did18_19 <- prepare_did_dataset(
-  data = analysis18_19,
-  dataset_name = "2018-19",
-
-  age_candidates = c(
-    "b4q6_per_fv"
-  ),
-
-  education_candidates = c(
-    "b4q8_per_fv"
-  ),
-
-  weight_candidates = c(
-    "MULT_per_fv",
-    "mult_per_fv"
-  )
-)
-
-
-did19_20 <- prepare_did_dataset(
-  data = analysis19_20,
-  dataset_name = "2019-20",
-
-  age_candidates = c(
-    "b4q6_per_fv"
-  ),
-
-  education_candidates = c(
-    "b4q8_per_fv"
-  ),
-
-  weight_candidates = c(
-    "MULT_per_fv",
-    "mult_per_fv"
-  )
-)
-
-
-did20_21 <- prepare_did_dataset(
-  data = analysis20_21,
-  dataset_name = "2020-21",
-
-  age_candidates = c(
-    "b4q6_perv1"
-  ),
-
-  education_candidates = c(
-    "b4q8_perv1"
-  ),
-
-  weight_candidates = c(
-    "mult_perv1",
-    "MULT_perv1"
-  )
-)
-
-
-did22 <- prepare_did_dataset(
-  data = analysis22,
-  dataset_name = "2022",
-
-  age_candidates = c(
-    "b4q6_cperv1",
-    "b4q6_perv1"
-  ),
-
-  education_candidates = c(
-    "b4q8_cperv1",
-    "b4q8_perv1"
-  ),
-
-  weight_candidates = c(
-    "mult_cperv1",
-    "mult_perv1"
-  )
-)
-
-
-did23 <- prepare_did_dataset(
-  data = analysis23,
-  dataset_name = "2023",
-
-  age_candidates = c(
-    "b4q6_cperv1",
-    "b4q6_perv1"
-  ),
-
-  education_candidates = c(
-    "b4q8_cperv1",
-    "b4q8_perv1"
-  ),
-
-  weight_candidates = c(
-    "mult_cperv1",
-    "mult_perv1"
-  )
-)
-
-
-did24 <- prepare_did_dataset(
-  data = analysis24,
-  dataset_name = "2024",
-
-  age_candidates = c(
-    "Age"
-  ),
-
-  education_candidates = c(
-    "General_Education_Level"
-  ),
-
-  weight_candidates = c(
-    "Subsample_Multiplier"
-  )
-)
-
-
-did25 <- prepare_did_dataset(
-  data = analysis25,
-  dataset_name = "2025",
-
-  age_candidates = c(
-    "age"
-  ),
-
-  education_candidates = c(
-    "gedu_lvl"
-  ),
-
-  weight_candidates = c(
-    "mult"
-  )
-)
-```
-
-```{r}
-# ============================================================
-# 5. Stack the annual datasets
-# ============================================================
-
-did_data <- bind_rows(
-  did17_18,
-  did18_19,
-  did19_20,
-  did20_21,
-  did22,
-  did23,
-  did24,
-  did25
-) %>%
-  arrange(
-    period_index,
-    district_id
-  )
-```
-
-```{r}
-# ============================================================
-# 6. Add DiD sample flags
-# ============================================================
-
-first_sample_period <- min(
-  did_data$period_index,
-  na.rm = TRUE
-)
-
-
-did_data <- did_data %>%
-  mutate(
-    # Controls are available
-    complete_controls = as.integer(
-      !is.na(age) &
-        !is.na(education_level)
-    ),
-
-    # Valid positive survey weight
-    valid_survey_weight = as.integer(
-      !is.na(survey_weight) &
-        survey_weight > 0
-    ),
-
-    # Informality was classified with sufficient information
-    informal_known = as.integer(
-      informal_unknown == 0
-    ),
-
-    # Treatment status during the available sample
-    metro_treatment_group = case_when(
-      is.na(metro_start_period_index) ~
-        "Never treated",
-
-      metro_start_period_index == 0L |
-        metro_start_period_index <
-        first_sample_period ~
-        "Metro before sample",
-
-      TRUE ~
-        "Metro opened during sample"
-    ),
-
-    # Quarters relative to metro opening.
-    # Only meaningful for metros opening during the sample.
-    event_time = case_when(
-      metro_treatment_group ==
-        "Metro opened during sample" ~
-
-        period_index -
-        metro_start_period_index,
-
-      TRUE ~
-        NA_integer_
-    ),
-
-    # Complete observation for a baseline model
-    baseline_sample = as.integer(
-      complete_controls == 1L &
-        valid_survey_weight == 1L &
-        !is.na(district_id) &
-        !is.na(period_index)
-    ),
-
-    # Complete observation for informality outcomes
-    informal_sample = as.integer(
-      baseline_sample == 1L &
-        informal_known == 1L
-    )
-  )
-```
-
-```{r}
-# ============================================================
-# 7. Validate the combined dataset
-# ============================================================
-
-expected_rows <- sum(
-  nrow(analysis17_18),
-  nrow(analysis18_19),
-  nrow(analysis19_20),
-  nrow(analysis20_21),
-  nrow(analysis22),
-  nrow(analysis23),
-  nrow(analysis24),
-  nrow(analysis25)
-)
-
-
-actual_rows <- nrow(
-  did_data
-)
-
-
-cat(
-  "Expected rows:",
-  expected_rows,
-  "\n"
-)
-
-cat(
-  "Actual rows:",
-  actual_rows,
-  "\n"
-)
-
-
-stopifnot(
-  expected_rows == actual_rows
-)
-```
 
 
