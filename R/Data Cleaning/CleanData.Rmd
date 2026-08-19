@@ -77,15 +77,15 @@ rm(Q1Q2_2324)
 1.Informal and Transport binaries.
 1.1Matching the NIC columns:
 ```{r}
-NIC17 <- data17_18_fv$b5pt2q5_per_fv
-NCO17 <- data17_18_fv$b5pt2q6_per_fv
+# NIC17 <- data17_18_fv$b5pt2q5_per_fv
+# NCO17 <- data17_18_fv$b5pt2q6_per_fv
 
 
 ```
 
 1.2Checking which NIC values are present and whether there are empty rows:
 ```{r}
-aggregate(data.frame(count = analysis17_18_fv$b5pt2q5_per_fv), list(value = analysis17_18_fv$b5pt2q5_per_fv), length)
+aggregate(data.frame(count = analysis17_18$b5pt2q5_per_fv), list(value = analysis17_18$b5pt2q5_per_fv), length)
 ```
 #We find that all NIC values in data frames _____ are 6 digits long.
 
