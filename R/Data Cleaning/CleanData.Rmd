@@ -18,9 +18,9 @@ data20_21_fv <- read_dta(here("Data","20-21","perv1.dta"))
 
 data21_22_fv <- readr::read_csv(here("Data","21-22","perv1.csv"))
 
-data22 <- read_dta(here("Data","22","cperv1.dta"))
+data22_23 <- read_dta(here("Data","22-23","perv1 (2).dta"))
 
-data23 <- read_dta(here("Data","23","cperv1.dta"))
+data23_24 <- read_dta(here("Data","23-24","perv1.dta"))
 
 data24 <- read_dta(here("Data","24","cperv1.dta"))
 
@@ -28,29 +28,129 @@ data25 <- read_dta(here("Data","25","cperv12025.dta"))
 
 ```
 
-Informal and Transport binaries.
+Creating analysis dataframe:
+```{r}
+analysis17_18 <- data17_18_fv
+analysis18_19 <- data18_19_fv
+analysis19_20 <- data19_20_fv
+analysis20_21 <- data20_21_fv
+analysis21_22 <- data21_22_fv
+analysis22_23 <- data22_23
+analysis23_24 <- data23_24
+analysis24 <- data24
+analysis25 <- data25
 
+#Zapping stata labels because they get in the way of dataframe manipulation
+analysis17_18 <- analysis17_18 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis18_19 <- analysis18_19 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis19_20 <- analysis19_20 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis20_21 <- analysis20_21 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis21_22 <- analysis21_22 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis22_23 <- analysis22_23 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis23_24 <- analysis23_24 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis24 <- analysis24 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+analysis25 <- analysis25 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
+
+#get rid of "data" so I don't even accidentally write over actual dataset
+rm(list=c("data17_18_fv","data18_19_fv","data19_20_fv","data20_21_fv","data21_22_fv","data22_23","data23_24","data24","data25"))
+```
+
+Matching quarters in 2024 data to consolidate the two:
+```{r}
+aggregate(data.frame(count = analysis22_23$qtr_perv1), list(value = analysis22_23$qtr_perv1), length)
+
+aggregate(data.frame(count = analysis23_24$qtr_perv1), list(value = analysis23_24$qtr_perv1), length)
+
+aggregate(data.frame(count = analysis24$Quarter), list(value = analysis24$Quarter), length)
+
+#Task now is to add the Q1 and Q2 from 23-24 into the 22 data, so it becomes 22 to end of 23 data.Then, get rid of 23_24 because Q3 and Q4 from 23_24 is already in 24.
+
+Q1Q2_2324 <- analysis23_24 %>% filter(qtr_perv1 %in% c("Q1","Q2"))
+analysis22J_23D <- rbind(analysis22_23,Q1Q2_2324)
+rm(analysis22_23)
+rm(analysis23_24)
+rm(Q1Q2_2324)
+
+#Before this, I checked that the columns/variables recorded only differ by 1 and that is panel. Given observations in 23_24 and 24 have identical 24 components, no need to correct for those. 22_23 and 23_24 also had identical columns, so no need to check.
+```
+
+1.Informal and Transport binaries.
+1.1Matching the NIC columns:
+```{r}
+NIC17 <- data17_18_fv$b5pt2q5_per_fv
+NCO17 <- data17_18_fv$b5pt2q6_per_fv
+
+
+```
+
+1.2Checking which NIC values are present and whether there are empty rows:
+```{r}
+aggregate(data.frame(count = analysis17_18_fv$b5pt2q5_per_fv), list(value = analysis17_18_fv$b5pt2q5_per_fv), length)
+```
+#We find that all NIC values in data frames _____ are 6 digits long.
+
+
+
+
+1.3Creating transport binary:
 ```{r}
 library(dplyr)
 
-
-NIC <- data17_18_fv$b5pt2q5_per_fv
-NCO <- data17_18_fv$b5pt2q6_per_fv
-
-analysis17_18 <- data17_18_fv
-
 analysis17_18$transport <- ifelse(
-  NIC %in% c("49211", "49219", "4911", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  NIC17 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
   1,
   0
 )
 
+analysis18_19$transport <- ifelse(
+  NIC18 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
 
-# 
-# analysis17_18 <- data.frame(NIC, NCO)
-# 
-# 
-# data17_18_fv %>% count(b5pt2q5_per_fv)
+analysis19_20$transport <- ifelse(
+  NIC19 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
+
+analysis20_21$transport <- ifelse(
+  NIC20 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
+
+analysis21_22$transport <- ifelse(
+  NIC21 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
+
+analysis22_23$transport <- ifelse(
+  NIC22 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
+
+analysis23_24$transport <- ifelse(
+  NIC23 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
+
+analysis24$transport <- ifelse(
+  NIC24 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  1,
+  0
+)
+
+analysis25$transport <- ifelse(
+  NIC25 %in% c("491100", "492101","492103","492203","492204","492299" ),
+  1,
+  0
+)
+
+#Repeat for all years until 2025 when NIC codes changed
 
 ```
 
