@@ -30,6 +30,7 @@ data25 <- read_dta(here("Data","25","cperv12025.dta"))
 
 Creating analysis dataframe:
 ```{r}
+library(dplyr)
 analysis17_18 <- data17_18_fv
 analysis18_19 <- data18_19_fv
 analysis19_20 <- data19_20_fv
@@ -77,10 +78,38 @@ rm(Q1Q2_2324)
 1.Informal and Transport binaries.
 1.1Matching the NIC columns:
 ```{r}
-# NIC17 <- data17_18_fv$b5pt2q5_per_fv
-# NCO17 <- data17_18_fv$b5pt2q6_per_fv
+NIC17 <- analysis17_18$b5pt1q5_per_fv
+NCO17 <- analysis17_18$b5pt2q6_per_fv
+
+sum(is.na(NIC17) | NIC17 == "")
+
+table(analysis17_18$b5pt1q3_per_fv, 
+      is.na(analysis17_18$b5pt1q5_per_fv),
+      useNA = "ifany")
 
 
+nic_missing <- is.na(analysis17_18$b5pt1q5_per_fv) |
+               trimws(analysis17_18$b5pt1q5_per_fv) == ""
+
+tab <- table(
+  analysis17_18$b5pt1q3_per_fv,
+  nic_missing
+)
+
+tab <- as.data.frame.matrix(tab)
+
+tab$status <- rownames(tab)
+rownames(tab) <- NULL
+
+tab <- tab[, c("status", "FALSE", "TRUE")]
+names(tab) <- c("status", "NIC_present", "NIC_missing")
+
+tab
+
+
+
+
+length(unique(analysis17_18$MULT_per_fv))
 ```
 
 1.2Checking which NIC values are present and whether there are empty rows:
@@ -96,8 +125,15 @@ aggregate(data.frame(count = analysis17_18$b5pt2q5_per_fv), list(value = analysi
 ```{r}
 library(dplyr)
 
+vectorrr <- startsWith(NIC17,"491")
+sum(vectorrr,na.rm=TRUE)
+
+analysis17_18$transport <- startsWith(NIC, "491") | startsWith(NIC, "492")
+sum(analysis17_18$transport,na.rm=TRUE)
+
 analysis17_18$transport <- ifelse(
-  NIC17 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  NIC17 %in% c("49110", "49211","49212","49213","49219",
+               "49222","49223","49224","49226","49229" ),
   1,
   0
 )
