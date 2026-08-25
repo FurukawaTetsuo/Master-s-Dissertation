@@ -24,8 +24,6 @@ data23_24 <- read_dta(here("Data","23-24","perv1.dta"))
 
 data24 <- read_dta(here("Data","24","cperv1.dta"))
 
-data25 <- read_dta(here("Data","25","cperv12025.dta"))
-
 ```
 
 Creating analysis dataframe:
@@ -39,7 +37,6 @@ analysis21_22 <- data21_22_fv
 analysis22_23 <- data22_23
 analysis23_24 <- data23_24
 analysis24 <- data24
-analysis25 <- data25
 
 #Zapping stata labels because they get in the way of dataframe manipulation
 analysis17_18 <- analysis17_18 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
@@ -50,7 +47,6 @@ analysis21_22 <- analysis21_22 %>% mutate(across(where(haven::is.labelled), have
 analysis22_23 <- analysis22_23 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
 analysis23_24 <- analysis23_24 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
 analysis24 <- analysis24 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
-analysis25 <- analysis25 %>% mutate(across(where(haven::is.labelled), haven::zap_labels))
 
 #get rid of "data" so I don't even accidentally write over actual dataset
 rm(list=c("data17_18_fv","data18_19_fv","data19_20_fv","data20_21_fv","data21_22_fv","data22_23","data23_24","data24","data25"))
@@ -67,7 +63,7 @@ aggregate(data.frame(count = analysis24$Quarter), list(value = analysis24$Quarte
 #Task now is to add the Q1 and Q2 from 23-24 into the 22 data, so it becomes 22 to end of 23 data.Then, get rid of 23_24 because Q3 and Q4 from 23_24 is already in 24.
 
 Q1Q2_2324 <- analysis23_24 %>% filter(qtr_perv1 %in% c("Q1","Q2"))
-analysis22J_23D <- rbind(analysis22_23,Q1Q2_2324)
+analysis22Jul_23Dec <- rbind(analysis22_23,Q1Q2_2324)
 rm(analysis22_23)
 rm(analysis23_24)
 rm(Q1Q2_2324)
@@ -76,60 +72,40 @@ rm(Q1Q2_2324)
 ```
 
 1.Informal and Transport binaries.
-1.1Matching the NIC columns:
+1.1Matching the NIC and NCO columns:
 ```{r}
 NIC17 <- analysis17_18$b5pt1q5_per_fv
-NCO17 <- analysis17_18$b5pt2q6_per_fv
+NCO17 <- analysis17_18$b5pt1q6_per_fv
 
-sum(is.na(NIC17) | NIC17 == "")
+NIC18 <- analysis18_19$b5pt1q5_per_fv
+NCO18 <- analysis18_19$b5pt1q6_per_fv
 
-table(analysis17_18$b5pt1q3_per_fv, 
-      is.na(analysis17_18$b5pt1q5_per_fv),
-      useNA = "ifany")
+NIC19 <- analysis19_20$b5pt1q5_per_fv
+NCO19 <- analysis19_20$b5pt1q6_per_fv
 
+NIC20 <- analysis20_21$b5pt1q5_perv1
+NCO20 <- analysis20_21$b5pt1q6_perv1
 
-nic_missing <- is.na(analysis17_18$b5pt1q5_per_fv) |
-               trimws(analysis17_18$b5pt1q5_per_fv) == ""
+NIC21 <- analysis21_22$b5pt1q5_perv1
+NCO21 <- analysis21_22$b5pt1q6_perv1
 
-tab <- table(
-  analysis17_18$b5pt1q3_per_fv,
-  nic_missing
-)
+NIC22 <- analysis22Jul_23Dec$b5pt1q5_perv1
+NCO22 <- analysis22Jul_23Dec$b5pt1q6_perv1
 
-tab <- as.data.frame.matrix(tab)
-
-tab$status <- rownames(tab)
-rownames(tab) <- NULL
-
-tab <- tab[, c("status", "FALSE", "TRUE")]
-names(tab) <- c("status", "NIC_present", "NIC_missing")
-
-tab
-
-
-
-
-length(unique(analysis17_18$MULT_per_fv))
+NIC24 <- analysis24$Principal_Industry_Code
+NCO24 <- analysis24$Principal_Occupation_Code
 ```
 
-1.2Checking which NIC values are present and whether there are empty rows:
+1.2 Checking which NIC values are present and whether there are empty rows:
 ```{r}
-aggregate(data.frame(count = analysis17_18$b5pt2q5_per_fv), list(value = analysis17_18$b5pt2q5_per_fv), length)
+aggregate(data.frame(count = NIC19), list(value = NIC19), length)
 ```
-#We find that all NIC values in data frames _____ are 6 digits long.
+#We find that all NIC values in all data frames are 6 digits long.
 
-
-
-
-1.3Creating transport binary:
+1.3 Creating transport binary:
 ```{r}
 library(dplyr)
 
-vectorrr <- startsWith(NIC17,"491")
-sum(vectorrr,na.rm=TRUE)
-
-analysis17_18$transport <- startsWith(NIC, "491") | startsWith(NIC, "492")
-sum(analysis17_18$transport,na.rm=TRUE)
 
 analysis17_18$transport <- ifelse(
   NIC17 %in% c("49110", "49211","49212","49213","49219",
@@ -139,66 +115,778 @@ analysis17_18$transport <- ifelse(
 )
 
 analysis18_19$transport <- ifelse(
-  NIC18 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  NIC18 %in% c("49110", "49211","49212","49213","49219",
+               "49222","49223","49224","49226","49229" ),
   1,
   0
 )
 
 analysis19_20$transport <- ifelse(
-  NIC19 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  NIC19 %in% c("49110", "49211","49212","49213","49219",
+               "49222","49223","49224","49226","49229" ),
   1,
   0
 )
 
 analysis20_21$transport <- ifelse(
-  NIC20 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  NIC20 %in% c("49110", "49211","49212","49213","49219",
+               "49222","49223","49224","49226","49229" ),
   1,
   0
 )
 
 analysis21_22$transport <- ifelse(
-  NIC21 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  NIC21 %in% c("49110", "49211","49212","49213","49219",
+               "49222","49223","49224","49226","49229"  ),
   1,
   0
 )
 
-analysis22_23$transport <- ifelse(
-  NIC22 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
-  1,
-  0
-)
-
-analysis23_24$transport <- ifelse(
-  NIC23 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+analysis22Jul_23Dec$transport <- ifelse(
+  NIC22 %in% c("49110", "49211","49212","49213","49219",
+               "49222","49223","49224","49226","49229" ),
   1,
   0
 )
 
 analysis24$transport <- ifelse(
-  NIC24 %in% c("4911", "49211", "49219", "492", "4921", "49212", "4922", "49213","49223","49224","49226","49229" ),
+  NIC24 %in% c("49110", "49211","49212","49213","49219",
+               "49222","49223","49224","49226","49229" ),
   1,
   0
 )
 
-analysis25$transport <- ifelse(
-  NIC25 %in% c("491100", "492101","492103","492203","492204","492299" ),
-  1,
-  0
-)
-
-#Repeat for all years until 2025 when NIC codes changed
+sum(analysis17_18$transport == 1, na.rm = TRUE) #4924
+sum(analysis18_19$transport==1, na.rm=TRUE) #4727
+sum(analysis19_20$transport==1, na.rm=TRUE) #4691
+sum(analysis20_21$transport==1, na.rm=TRUE) #4719
+sum(analysis21_22$transport==1, na.rm=TRUE) #4604
+sum(analysis22Jul_23Dec$transport==1, na.rm=TRUE) #7581
+sum(analysis24$transport==1, na.rm=TRUE) #5169
 
 ```
 
+1.4 Checking how many NCO codes are there for transport per year
+NCO-2004 used from 2017 until 2021
+NCO-2015 used from 2022 to 2024
+#Will look at these and check if share of drivers changed later
+```{r}
+
+NCO17_transport <- NCO17[analysis17_18$transport == 1]
+
+aggregate(
+  data.frame(count = NCO17_transport),
+  list(value = NCO17_transport),
+  length
+)
+
+#NCO codes 980 and 990 do not fit the documentation, and make up 0.01% of entries. Treat as missing/ignore
 
 
 
+NCO18_transport <- NCO18[analysis18_19$transport == 1]
+
+aggregate(
+  data.frame(count = NCO18_transport),
+  list(value = NCO18_transport),
+  length
+)
+
+
+NCO19_transport <- NCO19[analysis19_20$transport == 1]
+
+aggregate(
+  data.frame(count = NCO19_transport),
+  list(value = NCO19_transport),
+  length
+)
+
+
+NCO20_transport <- NCO20[analysis20_21$transport == 1]
+
+aggregate(
+  data.frame(count = NCO20_transport),
+  list(value = NCO20_transport),
+  length
+)
+
+NCO21_transport <- NCO21[analysis21_22$transport == 1]
+
+aggregate(
+  data.frame(count = NCO21_transport),
+  list(value = NCO21_transport),
+  length
+)
+
+NCO22_transport <- NCO22[analysis22Jul_23Dec$transport == 1]
+
+aggregate(
+  data.frame(count = NCO22_transport),
+  list(value = NCO22_transport),
+  length
+)
+
+NCO24_transport <- NCO24[analysis24$transport == 1]
+
+aggregate(
+  data.frame(count = NCO24_transport),
+  list(value = NCO24_transport),
+  length
+)
+```
+
+1.5 Creating informal binary
+```{r}
+# STATUS = 11 or 12
+# │
+# ├── Enterprise Type = 01, 02, 03, 04
+# │       → INFORMAL = 1
+# │
+# ├── Enterprise Type = clearly non-informal category
+# │       → INFORMAL = 0
+# │
+# └── Enterprise Type missing / ambiguous
+#         → INFORMAL = NA
+# 
+# 
+# STATUS = 21
+# │
+# └── INFORMAL = 1
+# 
+# 
+# STATUS = 31, 41 or 51
+# │
+# ├── Social Security = 8
+# │       → INFORMAL = 1
+# │
+# ├── Social Security = 1–7
+# │       → INFORMAL = 0
+# │
+# └── Social Security = 9 / missing
+#         → INFORMAL = NA
+# 
+# 
+# ALL OTHER STATUS CODES
+# │
+# └── INFORMAL = NA
+#     (not an employed worker covered by this definition)
+
+
+analysis17_18 <- analysis17_18 |>
+  dplyr::mutate(
+    informal = dplyr::case_when(
+
+      # Own-account workers / employers in informal-sector enterprises
+      b5pt1q3_per_fv %in% c("11", "12") &
+        b5pt1q9_per_fv %in% c("01", "02", "03", "04") ~ 1,
+
+      # Own-account workers / employers in clearly non-informal enterprises
+      b5pt1q3_per_fv %in% c("11", "12") &
+        !is.na(b5pt1q9_per_fv) &
+        b5pt1q9_per_fv != "" &
+        !b5pt1q9_per_fv %in% c("01", "02", "03", "04", "19") ~ 0,
+
+      # Contributing/unpaid family workers
+      b5pt1q3_per_fv == "21" ~ 1,
+
+      # Employees with no employer-linked social security
+      b5pt1q3_per_fv %in% c("31", "41", "51") &
+        b5pt1q13_per_fv == "8" ~ 1,
+
+      # Employees with some social-security coverage
+      b5pt1q3_per_fv %in% c("31", "41", "51") &
+        b5pt1q13_per_fv %in% as.character(1:7) ~ 0,
+
+      # Unknown / not classifiable / non-workers
+      TRUE ~ NA_real_
+    )
+  )
+
+analysis18_19 <- analysis18_19 |>
+  dplyr::mutate(
+    informal = dplyr::case_when(
+
+      # Own-account workers / employers in informal-sector enterprises
+      b5pt1q3_per_fv %in% c("11", "12") &
+        b5pt1q9_per_fv %in% c("01", "02", "03", "04") ~ 1,
+
+      # Own-account workers / employers in clearly non-informal enterprises
+      b5pt1q3_per_fv %in% c("11", "12") &
+        !is.na(b5pt1q9_per_fv) &
+        b5pt1q9_per_fv != "" &
+        !b5pt1q9_per_fv %in% c("01", "02", "03", "04", "19") ~ 0,
+
+      # Contributing/unpaid family workers
+      b5pt1q3_per_fv == "21" ~ 1,
+
+      # Employees with no employer-linked social security
+      b5pt1q3_per_fv %in% c("31", "41", "51") &
+        b5pt1q13_per_fv == "8" ~ 1,
+
+      # Employees with some social-security coverage
+      b5pt1q3_per_fv %in% c("31", "41", "51") &
+        b5pt1q13_per_fv %in% as.character(1:7) ~ 0,
+
+      # Unknown / not classifiable / non-workers
+      TRUE ~ NA_real_
+    )
+  )
+
+analysis19_20 <- analysis19_20 |>
+  dplyr::mutate(
+    informal = dplyr::case_when(
+
+      # Own-account workers / employers in informal-sector enterprises
+      b5pt1q3_per_fv %in% c("11", "12") &
+        b5pt1q9_per_fv %in% c("01", "02", "03", "04") ~ 1,
+
+      # Own-account workers / employers in clearly non-informal enterprises
+      b5pt1q3_per_fv %in% c("11", "12") &
+        !is.na(b5pt1q9_per_fv) &
+        b5pt1q9_per_fv != "" &
+        !b5pt1q9_per_fv %in% c("01", "02", "03", "04", "19") ~ 0,
+
+      # Contributing/unpaid family workers
+      b5pt1q3_per_fv == "21" ~ 1,
+
+      # Employees with no employer-linked social security
+      b5pt1q3_per_fv %in% c("31", "41", "51") &
+        b5pt1q13_per_fv == "8" ~ 1,
+
+      # Employees with some social-security coverage
+      b5pt1q3_per_fv %in% c("31", "41", "51") &
+        b5pt1q13_per_fv %in% as.character(1:7) ~ 0,
+
+      # Unknown / not classifiable / non-workers
+      TRUE ~ NA_real_
+    )
+  )
+
+analysis20_21 <- analysis20_21 |>
+  dplyr::mutate(
+    informal = dplyr::case_when(
+
+      # Own-account workers / employers in informal-sector enterprises
+      b5pt1q3_perv1 %in% c("11", "12") &
+        b5pt1q9_perv1 %in% c("01", "02", "03", "04") ~ 1,
+
+      # Own-account workers / employers in clearly non-informal enterprises
+      b5pt1q3_perv1 %in% c("11", "12") &
+        !is.na(b5pt1q9_perv1) &
+        b5pt1q9_perv1 != "" &
+        !b5pt1q9_perv1 %in% c("01", "02", "03", "04", "19") ~ 0,
+
+      # Contributing/unpaid family workers
+      b5pt1q3_perv1 == "21" ~ 1,
+
+      # Employees with no employer-linked social security
+      b5pt1q3_perv1 %in% c("31", "41", "51") &
+        b5pt1q13_perv1 == "8" ~ 1,
+
+      # Employees with some social-security coverage
+      b5pt1q3_perv1 %in% c("31", "41", "51") &
+        b5pt1q13_perv1 %in% as.character(1:7) ~ 0,
+
+      # Unknown / not classifiable / non-workers
+      TRUE ~ NA_real_
+    )
+  )
+
+analysis21_22 <- analysis21_22 |>
+  dplyr::mutate(
+    informal = dplyr::case_when(
+
+      # Own-account workers / employers in informal-sector enterprises
+      b5pt1q3_perv1 %in% c("11", "12") &
+        b5pt1q9_perv1 %in% c("01", "02", "03", "04") ~ 1,
+
+      # Own-account workers / employers in clearly non-informal enterprises
+      b5pt1q3_perv1 %in% c("11", "12") &
+        !is.na(b5pt1q9_perv1) &
+        b5pt1q9_perv1 != "" &
+        !b5pt1q9_perv1 %in% c("01", "02", "03", "04", "19") ~ 0,
+
+      # Contributing/unpaid family workers
+      b5pt1q3_perv1 == "21" ~ 1,
+
+      # Employees with no employer-linked social security
+      b5pt1q3_perv1 %in% c("31", "41", "51") &
+        b5pt1q13_perv1 == "8" ~ 1,
+
+      # Employees with some social-security coverage
+      b5pt1q3_perv1 %in% c("31", "41", "51") &
+        b5pt1q13_perv1 %in% as.character(1:7) ~ 0,
+
+      # Unknown / not classifiable / non-workers
+      TRUE ~ NA_real_
+    )
+  )
+
+analysis22Jul_23Dec <- analysis22Jul_23Dec |>
+  dplyr::mutate(
+    informal = dplyr::case_when(
+
+      # Own-account workers / employers in informal-sector enterprises
+      b5pt1q3_perv1 %in% c("11", "12") &
+        b5pt1q9_perv1 %in% c("01", "02", "03", "04") ~ 1,
+
+      # Own-account workers / employers in clearly non-informal enterprises
+      b5pt1q3_perv1 %in% c("11", "12") &
+        !is.na(b5pt1q9_perv1) &
+        b5pt1q9_perv1 != "" &
+        !b5pt1q9_perv1 %in% c("01", "02", "03", "04", "19") ~ 0,
+
+      # Contributing/unpaid family workers
+      b5pt1q3_perv1 == "21" ~ 1,
+
+      # Employees with no employer-linked social security
+      b5pt1q3_perv1 %in% c("31", "41", "51") &
+        b5pt1q13_perv1 == "8" ~ 1,
+
+      # Employees with some social-security coverage
+      b5pt1q3_perv1 %in% c("31", "41", "51") &
+        b5pt1q13_perv1 %in% as.character(1:7) ~ 0,
+
+      # Unknown / not classifiable / non-workers
+      TRUE ~ NA_real_
+    )
+  )
+
+analysis24 <- analysis24 |>
+  dplyr::mutate(
+    informal = dplyr::case_when(
+
+      # Own-account workers / employers in informal-sector enterprises
+      Principal_Status_Code %in% c("11", "12") &
+        Principal_Enterprise_Type %in% c("01", "02", "03", "04") ~ 1,
+
+      # Own-account workers / employers in clearly non-informal enterprises
+      Principal_Status_Code %in% c("11", "12") &
+        !is.na(Principal_Enterprise_Type) &
+        Principal_Enterprise_Type != "" &
+        !Principal_Enterprise_Type %in% c("01", "02", "03", "04", "19") ~ 0,
+
+      # Contributing/unpaid family workers
+      Principal_Status_Code == "21" ~ 1,
+
+      # Employees with no employer-linked social security
+      Principal_Status_Code %in% c("31", "41", "51") &
+        Principal_Social_Security == "8" ~ 1,
+
+      # Employees with some social-security coverage
+      Principal_Status_Code %in% c("31", "41", "51") &
+        Principal_Social_Security %in% as.character(1:7) ~ 0,
+
+      # Unknown / not classifiable / non-workers
+      TRUE ~ NA_real_
+    )
+  )
+
+sum(analysis17_18$informal=="1", na.rm = TRUE)
+
+sum(analysis18_19$informal=="1", na.rm = TRUE)
+
+sum(analysis19_20$informal=="1", na.rm = TRUE)
+
+sum(analysis20_21$informal=="1", na.rm = TRUE)
+
+sum(analysis21_22$informal=="1", na.rm = TRUE)
+
+sum(analysis22Jul_23Dec$informal=="1", na.rm = TRUE)
+
+sum(analysis24$informal=="1", na.rm = TRUE)
+```
+
+
+2.Creating periods based on quarter and year
+```{r}
+analysis17_18$period <- match(
+  analysis17_18$quarter_per_fv,
+  c("Q1", "Q2", "Q3", "Q4")
+)
+
+analysis18_19$period <- match(
+  analysis18_19$quarter_per_fv,
+  c("Q5", "Q6", "Q7", "Q8")
+) + 4
+
+analysis19_20$period <- match(
+  analysis19_20$quarter_per_fv,
+  c("Q1", "Q2", "Q3", "Q4")
+) + 8
+
+analysis20_21$period <- match(
+  analysis20_21$qtr_perv1,
+  c("Q5", "Q6", "Q7", "Q8")
+) + 12
+
+analysis21_22$period <- match(
+  analysis21_22$qtr_perv1,
+  c("Q1", "Q2", "Q3", "Q4")
+) + 16
+
+analysis22Jul_23Dec$period <- match(
+  analysis22Jul_23Dec$qtr_perv1,
+  c("Q5", "Q6", "Q7", "Q8", "Q1", "Q2")
+) + 20
+
+analysis24$period <- match(
+  analysis24$Quarter, 
+  c("Q3","Q4","Q5","Q6")
+) +26
 
 
 
+aggregate(data.frame(count = analysis17_18$period), list(value = analysis17_18$period), length)
+aggregate(data.frame(count = analysis18_19$period), list(value = analysis18_19$period), length)
+aggregate(data.frame(count = analysis19_20$period), list(value = analysis19_20$period), length)
+aggregate(data.frame(count = analysis20_21$period), list(value = analysis20_21$period), length)
+aggregate(data.frame(count = analysis21_22$period), list(value = analysis21_22$period), length)
+aggregate(data.frame(count = analysis22Jul_23Dec$period), list(value = analysis22Jul_23Dec$period), length)
+aggregate(data.frame(count = analysis24$period), list(value = analysis24$period), length)
+
+#period successfully made
+```
+
+3.Treatment variable
+```{r}
+# For:
+#   Q1 2019 and onwards for state:24 District:7 
+#   Q1 2019 and onwards for state:27 district:9
+#   Q4 2021 and onwards for state:9 district: 33
+#   Q1 2022 and onwards for state:24 district:25
+# Treatment is 1
+
+analysis17_18 <- analysis17_18 %>%
+  mutate(
+    Treatment = case_when(
+
+      # Must be urban
+      b1q3_per_fv == "2" &
+
+      (
+        # State 24, District 7: 2019 Q1 onwards
+        (state_per_fv == "24" &
+         b1q4_per_fv == "07" &
+         (period>=7)) |
+
+        # State 27, District 9: 2019 Q1 onwards
+        (state_per_fv == "27" &
+         b1q4_per_fv == "09" &
+         (period>=7)) |
+
+        # State 9, District 33: 2021 Q4 onwards
+        (state_per_fv == "09" &
+         b1q4_per_fv == "33" &
+         (period>=18)) |
+
+        # State 24, District 25: 2022 Q1 onwards
+        (state_per_fv == "24" &
+         b1q4_per_fv == "25" &
+         (period>=19))
+      ) ~ 1,
+
+      TRUE ~ 0
+    )
+  )
+
+analysis18_19 <- analysis18_19 %>%
+  mutate(
+    Treatment = case_when(
+
+      # Must be urban
+      b1q3_per_fv == "2" &
+
+      (
+        # State 24, District 7: 2019 Q1 onwards
+        (state_per_fv == "24" &
+         b1q4_per_fv == "07" &
+         (period>=7)) |
+
+        # State 27, District 9: 2019 Q1 onwards
+        (state_per_fv == "27" &
+         b1q4_per_fv == "09" &
+         (period>=7)) |
+
+        # State 9, District 33: 2021 Q4 onwards
+        (state_per_fv == "09" &
+         b1q4_per_fv == "33" &
+         (period>=18)) |
+
+        # State 24, District 25: 2022 Q1 onwards
+        (state_per_fv == "24" &
+         b1q4_per_fv == "25" &
+         (period>=19))
+      ) ~ 1,
+
+      TRUE ~ 0
+    )
+  )
+
+analysis19_20 <- analysis19_20 %>%
+  mutate(
+    Treatment = case_when(
+
+      # Must be urban
+      b1q3_per_fv == "2" &
+
+      (
+        # State 24, District 7: 2019 Q1 onwards
+        (state_per_fv == "24" &
+        b1q4_per_fv == "07" &
+         (period>=7)) |
+
+        # State 27, District 9: 2019 Q1 onwards
+        (state_per_fv == "27" &
+         b1q4_per_fv == "09" &
+         (period>=7)) |
+
+        # State 9, District 33: 2021 Q4 onwards
+        (state_per_fv == "09" &
+         b1q4_per_fv == "33" &
+         (period>=18)) |
+
+        # State 24, District 25: 2022 Q1 onwards
+        (state_per_fv == "24" &
+        b1q4_per_fv == "25" &
+         (period>=19))
+      ) ~ 1,
+
+      TRUE ~ 0
+    )
+  )
+
+analysis20_21 <- analysis20_21 %>%
+  mutate(
+    Treatment = case_when(
+
+      # Must be urban
+      b1q3_perv1 == "2" &
+
+      (
+        # State 24, District 7: 2019 Q1 onwards
+        (state_perv1 == "24" &
+         distcode_perv1 == "07" &
+         (period>=7)) |
+
+        # State 27, District 9: 2019 Q1 onwards
+        (state_perv1== "27" &
+         distcode_perv1 == "09" &
+         (period>=7)) |
+
+        # State 9, District 33: 2021 Q4 onwards
+        (state_perv1 == "09" &
+         distcode_perv1 == "33" &
+         (period>=18)) |
+
+        # State 24, District 25: 2022 Q1 onwards
+        (state_perv1 == "24" &
+         distcode_perv1 == "25" &
+         (period>=19))
+      ) ~ 1,
+
+      TRUE ~ 0
+    )
+  )
+
+analysis21_22 <- analysis21_22 %>%
+  mutate(
+    Treatment = case_when(
+
+      # Must be urban
+      b1q3_perv1 == "2" &
+
+      (
+        # State 24, District 7: 2019 Q1 onwards
+        (state_perv1 == "24" &
+         distcode_perv1== "07" &
+         (period>=7)) |
+
+        # State 27, District 9: 2019 Q1 onwards
+        (state_perv1 == "27" &
+         distcode_perv1 == "09" &
+         (period>=7)) |
+
+        # State 9, District 33: 2021 Q4 onwards
+        (state_perv1 == "09" &
+        distcode_perv1 == "33" &
+         (period>=18)) |
+
+        # State 24, District 25: 2022 Q1 onwards
+        (state_perv1== "24" &
+         distcode_perv1 == "25" &
+         (period>=19))
+      ) ~ 1,
+
+      TRUE ~ 0
+    )
+  )
+
+analysis22Jul_23Dec <- analysis22Jul_23Dec %>%
+  mutate(
+    Treatment = case_when(
+
+      # Must be urban
+      b1q3_perv1 == "2" &
+
+      (
+        # State 24, District 7: 2019 Q1 onwards
+        (state_perv1 == "24" &
+         distcode_perv1 == "07" &
+         (period>=7)) |
+
+        # State 27, District 9: 2019 Q1 onwards
+        (state_perv1 == "27" &
+         distcode_perv1 == "09" &
+         (period>=7)) |
+
+        # State 9, District 33: 2021 Q4 onwards
+        (state_perv1 == "09" &
+         distcode_perv1 == "33" &
+         (period>=18)) |
+
+        # State 24, District 25: 2022 Q1 onwards
+        (state_perv1 == "24" &
+         distcode_perv1 == "25" &
+         (period>=19))
+      ) ~ 1,
+
+      TRUE ~ 0
+    )
+  )
+
+analysis24 <- analysis24 %>%
+  mutate(
+    Treatment = case_when(
+
+      # Must be urban
+      Sector == "2" &
+
+      (
+        # State 24, District 7: 2019 Q1 onwards
+        (State_UT_Code == "24" &
+         District_Code == "07" &
+         (period>=7)) |
+
+        # State 27, District 9: 2019 Q1 onwards
+        (State_UT_Code == "27" &
+         District_Code == "09" &
+         (period>=7)) |
+
+        # State 9, District 33: 2021 Q4 onwards
+        (State_UT_Code == "09" &
+         District_Code == "33" &
+         (period>=18)) |
+
+        # State 24, District 25: 2022 Q1 onwards
+        (State_UT_Code== "24" &
+         District_Code == "25" &
+         (period>=19))
+      ) ~ 1,
+
+      TRUE ~ 0
+    )
+  )
 
 
 
+sum(analysis17_18$Treatment=="1" & analysis17_18$transport=="1" & analysis17_18$informal=="1",na.rm=TRUE)
+sum(analysis18_19$Treatment=="1" & analysis18_19$transport=="1" & analysis18_19$informal=="1",na.rm=TRUE)
+sum(analysis19_20$Treatment=="1" & analysis19_20$transport=="1" & analysis19_20$informal=="1",na.rm=TRUE)
+sum(analysis20_21$Treatment=="1" & analysis20_21$transport=="1" & analysis20_21$informal=="1",na.rm=TRUE)
+sum(analysis21_22$Treatment=="1" & analysis21_22$transport=="1" & analysis21_22$informal=="1",na.rm=TRUE)
+sum(analysis22Jul_23Dec$Treatment=="1" & analysis22Jul_23Dec$transport=="1" & analysis22Jul_23Dec$informal=="1",na.rm=TRUE)
+sum(analysis24$Treatment=="1" & analysis24$transport=="1" & analysis24$informal=="1",na.rm=TRUE)
+
+
+```
+
+4.Weight for each person
+```{r}
+library(dplyr)
+
+# 2017-18
+analysis17_18 <- analysis17_18 %>%
+  mutate(
+    weight = case_when(
+      is.na(NSS_per_fv) | is.na(NSC_per_fv) | is.na(MULT_per_fv) ~ NA_real_,
+      NSS_per_fv == NSC_per_fv ~ MULT_per_fv / 100,
+      NSS_per_fv != NSC_per_fv ~ MULT_per_fv / 200
+    )
+  )
+
+
+# 2018-19
+analysis18_19 <- analysis18_19 %>%
+  mutate(
+    weight = case_when(
+      is.na(NSS_per_fv) | is.na(NSC_per_fv) | is.na(MULT_per_fv) ~ NA_real_,
+      NSS_per_fv == NSC_per_fv ~ MULT_per_fv / 100,
+      NSS_per_fv != NSC_per_fv ~ MULT_per_fv / 200
+    )
+  )
+
+
+# 2019-20
+analysis19_20 <- analysis19_20 %>%
+  mutate(
+    weight = case_when(
+      is.na(NSS_per_fv) | is.na(NSC_per_fv) | is.na(MULT_per_fv) ~ NA_real_,
+      NSS_per_fv == NSC_per_fv ~ MULT_per_fv / 100,
+      NSS_per_fv != NSC_per_fv ~ MULT_per_fv / 200
+    )
+  )
+
+
+# 2020-21
+analysis20_21 <- analysis20_21 %>%
+  mutate(
+    weight = case_when(
+      is.na(NSS_perv1) | is.na(NSC_perv1) | is.na(mult_perv1) ~ NA_real_,
+      NSS_perv1 == NSC_perv1 ~ mult_perv1 / 100,
+      NSS_perv1 != NSC_perv1 ~ mult_perv1 / 200
+    )
+  )
+
+
+# 2021-22
+analysis21_22 <- analysis21_22 %>%
+  mutate(
+    weight = case_when(
+      is.na(NSS_perv1) | is.na(NSC_perv1) | is.na(mult_perv1) ~ NA_real_,
+      NSS_perv1 == NSC_perv1 ~ mult_perv1 / 100,
+      NSS_perv1 != NSC_perv1 ~ mult_perv1 / 200
+    )
+  )
+
+
+# July 2022 - December 2023
+analysis22Jul_23Dec <- analysis22Jul_23Dec %>%
+  mutate(
+    weight = case_when(
+      is.na(NSS_perv1) | is.na(NSC_perv1) | is.na(mult_perv1) ~ NA_real_,
+      NSS_perv1 == NSC_perv1 ~ mult_perv1 / 100,
+      NSS_perv1 != NSC_perv1 ~ mult_perv1 / 200
+    )
+  )
+
+
+# 2024
+analysis24 <- analysis24 %>%
+  mutate(
+    weight = case_when(
+      is.na(Ns_Count_Sector_Subsample) |
+        is.na(Ns_Count_Sector_Substratum) |
+        is.na(Subsample_Multiplier) ~ NA_real_,
+
+      Ns_Count_Sector_Subsample == Ns_Count_Sector_Substratum ~
+        Subsample_Multiplier / 100,
+
+      Ns_Count_Sector_Subsample != Ns_Count_Sector_Substratum ~
+        Subsample_Multiplier / 200
+    )
+  )
+```
 
 
 
