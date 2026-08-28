@@ -1,36 +1,143 @@
-\documentclass{article}
-\title{The informal labour effects of metro openings in Indian districts}
-\author{Tetsuo Furukawa}
-\date{}
+\documentclass{article} 
+\usepackage[T1]{fontenc} 
+\usepackage[utf8]{inputenc} 
+\usepackage[a4paper, top=2.54cm, bottom=2.54cm, left=2.54cm, right=2.54cm]{geometry} 
+\usepackage{mathptmx} 
+\usepackage{microtype} 
+\usepackage{amssymb} 
+\usepackage{parskip} 
+\usepackage{titlesec} 
+\usepackage{enumitem} 
 
-\begin{document}
-\maketitle
+\setcounter{secnumdepth}{0} 
+\pagestyle{plain}
+
+ % Centred, normal-weight section headings (no bold, no number).
+  % This also applies to \tableofcontents and \listoffigures headings, 
+  % since LaTeX typesets them via \section*{\contentsname} etc. 
+  \titleformat{\section}[block]{\normalfont\centering}{}{0em}{} 
+  \titlespacing*{\section}{0pt}{2em}{1em} 
+  % TOC/LOF heading names 
+  \renewcommand{\contentsname}{Table of Contents} 
+
+  % Normal-weight (not bold) entries in the TOC 
+  \makeatletter 
+  \renewcommand*\l@section[2]{\@dottedtocline{1}{1.5em}{2.3em}{#1}{#2}} 
+  \makeatother 
+  
+  \begin{document} 
+  \begin{titlepage} 
+    \vspace*{10cm} 
+    \begin{center} 
+        The effect of Urban Metro Openings on Informal Transport Employment in Indian Cities 
+    \end{center} 
+    
+    \vspace{2.5cm} 
+    
+    \begin{center} 
+        Tetsuo Furukawa
+    \end{center} 
+    
+    \vspace{2.5cm} 
+    
+    \begin{center} 
+        Dissertation Supervisor: Dr. Lucas Conwell
+    \end{center} 
+    \vspace{2cm} 
+    
+    \begin{center} Dissertation submitted in part-fulfilment of the MSc in Economics,\\[0.6em] 
+        University College London\\[0.6em] 
+        September 2026 
+    \end{center} 
+\end{titlepage} 
+
+\section*{Declaration} 
+I, Tetsuo Furukawa, hereby declare that the work presented in this dissertation is my own original work. Where information has been derived from other sources, I confirm that this has been clearly and fully identified and acknowledged. No part of this dissertation contains material previously submitted to the examiners of this or any other university, or any material previously submitted for any other assessment. 
+\medskip 
+
+Name: Tetsuo Furukawa
+
+\medskip 
+
+Date: 1st of September 2026
+
+\vspace{2cm} 
+
+\section*{Classification} This piece of research is primarily (please indicate as appropriate): 
+\begin{itemize}[label=$\boxdot$, leftmargin=2em, itemsep=2pt, topsep=0.5em] 
+    \item an empirical/econometric study 
+\end{itemize} 
+
+\begin{itemize}[label=$\square$, leftmargin=2em, itemsep=2pt, topsep=0.5em] 
+    \item the examination of a theoretical problem 
+    \item a critical analysis of a policy issue 
+    \item an analytical survey of empirical and/or theoretical literature
+\end{itemize}
+
+\vspace{2cm} 
+
+\begin{center} 
+    Dissertation Library 
+\end{center} 
+
+\begin{quote} I give permission for a pdf electronic copy of this dissertation to be made available to future students by way of the Dissertation Library, should the Department of Economics choose to use it in this way. 
+\end{quote} 
+
+\begin{center} 
+    \underline{Yes}
+\end{center} 
+
 \newpage
-\tableofcontents
+\section*{Abstract} 
+\begin{center} 
+    \textasciitilde300 word summary of your research topic, methodology and findings 
+\end{center} 
+
+\vfill 
+
+\section*{Acknowledgements} 
+
+(if applicable) 
+
+\vspace{2cm} 
+
+\noindent Word count: 
+
+\newpage 
+\tableofcontents 
+
+\newpage 
+\listoffigures 
+
+
 \newpage
-
-
 \section{Introduction}
 
 \newpage
 \section{Literature Review}
 
-
-
-
+\newpage
+\section{Methodology}
 
 \newpage
+\section{Results}
 
-
-
-\section{Data}
 \newpage
-\section{Method/Analysis}
-\newpage
-\section{Review}
+\section{Analysis}
+
 \newpage
 \section{Conclusion}
 
+\newpage 
+\section*{Bibliography} 
+\addcontentsline{toc}{section}{Bibliography} 
 
+\textit{(The Harvard system of referencing is recommended)} 
+
+
+\newpage
+\section*{Appendix 1} 
+\addcontentsline{toc}{section}{Appendix 1} 
 
 \end{document}
+
