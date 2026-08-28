@@ -166,7 +166,7 @@ sum(analysis24$transport==1, na.rm=TRUE) #5169
 
 ```
 
-1.4 Checking how many NCO codes are there for transport per year
+**1.4 Checking how many NCO codes are there for transport per year
 NCO-2004 used from 2017 until 2021
 NCO-2015 used from 2022 to 2024
 #Will look at these and check if share of drivers changed later
@@ -554,240 +554,428 @@ aggregate(data.frame(count = analysis24$period), list(value = analysis24$period)
 #   Q1 2019 and onwards for state:24 District:7 
 #   Q1 2019 and onwards for state:27 district:9
 #   Q4 2021 and onwards for state:9 district: 33
-#   Q1 2022 and onwards for state:24 district:25
+#   Q1 2022 and onwards for state:27 district:25
 # Treatment is 1
 
-analysis17_18 <- analysis17_18 %>%
-  mutate(
-    Treatment = case_when(
+#Adding stratum to limit treatment to cities, only cities with stratum>4 in each treatment district has the metro, so better identification. i.e no different city is identified.
 
-      # Must be urban
-      b1q3_per_fv == "2" &
+analysis17_18$Treatment <- 0
+analysis18_19$Treatment <- 0
+analysis19_20$Treatment <- 0
+analysis20_21$Treatment <- 0
+analysis21_22$Treatment <- 0
+analysis22Jul_23Dec$Treatment <- 0
+analysis24$Treatment <- 0
 
-      (
-        # State 24, District 7: 2019 Q1 onwards
-        (state_per_fv == "24" &
-         b1q4_per_fv == "07" &
-         (period>=7)) |
+# ================================================================
+# 3. TREATMENT VARIABLE
+# ================================================================
 
-        # State 27, District 9: 2019 Q1 onwards
-        (state_per_fv == "27" &
-         b1q4_per_fv == "09" &
-         (period>=7)) |
+library(dplyr)
 
-        # State 9, District 33: 2021 Q4 onwards
-        (state_per_fv == "09" &
-         b1q4_per_fv == "33" &
-         (period>=18)) |
 
-        # State 24, District 25: 2022 Q1 onwards
-        (state_per_fv == "24" &
-         b1q4_per_fv == "25" &
-         (period>=19))
-      ) ~ 1,
+# ----------------------------------------------------------------
+# Helper function for harmonised metro treatment assignment
+#
+# IMPORTANT:
+# - 2017-18 to 2020-21: city-size stratum is stored in b1q6
+# - 2021-22 to 2024: city-size stratum is stored in b1q5
+# - Urban strata >= 4 represent individual Census-2011 cities
+#   with populations of at least 15 lakh.
+#
+# Primary treatment timing uses the first fully exposed quarter:
+#   Ahmedabad: period 8
+#   Nagpur:    period 8
+#   Kanpur:    period 19
+#   Pune/PCMC: period 20
+#
+# The opening-quarter specification is retained for sensitivity:
+#   Ahmedabad: period 7
+#   Nagpur:    period 7
+#   Kanpur:    period 18
+#   Pune/PCMC: period 19
+# ----------------------------------------------------------------
 
-      TRUE ~ 0
-    )
+add_metro_treatment <- function(df,
+                                urban_var,
+                                city_stratum_var,
+                                state_var,
+                                district_var) {
+
+  required_variables <- c(
+    urban_var,
+    city_stratum_var,
+    state_var,
+    district_var,
+    "period"
   )
 
-analysis18_19 <- analysis18_19 %>%
-  mutate(
-    Treatment = case_when(
+  missing_variables <- setdiff(required_variables, names(df))
 
-      # Must be urban
-      b1q3_per_fv == "2" &
-
-      (
-        # State 24, District 7: 2019 Q1 onwards
-        (state_per_fv == "24" &
-         b1q4_per_fv == "07" &
-         (period>=7)) |
-
-        # State 27, District 9: 2019 Q1 onwards
-        (state_per_fv == "27" &
-         b1q4_per_fv == "09" &
-         (period>=7)) |
-
-        # State 9, District 33: 2021 Q4 onwards
-        (state_per_fv == "09" &
-         b1q4_per_fv == "33" &
-         (period>=18)) |
-
-        # State 24, District 25: 2022 Q1 onwards
-        (state_per_fv == "24" &
-         b1q4_per_fv == "25" &
-         (period>=19))
-      ) ~ 1,
-
-      TRUE ~ 0
+  if (length(missing_variables) > 0) {
+    stop(
+      "The following variables are missing: ",
+      paste(missing_variables, collapse = ", ")
     )
-  )
+  }
 
-analysis19_20 <- analysis19_20 %>%
-  mutate(
-    Treatment = case_when(
 
-      # Must be urban
-      b1q3_per_fv == "2" &
+  df %>%
 
-      (
-        # State 24, District 7: 2019 Q1 onwards
-        (state_per_fv == "24" &
-        b1q4_per_fv == "07" &
-         (period>=7)) |
+    mutate(
 
-        # State 27, District 9: 2019 Q1 onwards
-        (state_per_fv == "27" &
-         b1q4_per_fv == "09" &
-         (period>=7)) |
+      # ----------------------------------------------------------
+      # Standardised versions of the raw geography variables
+      # ----------------------------------------------------------
 
-        # State 9, District 33: 2021 Q4 onwards
-        (state_per_fv == "09" &
-         b1q4_per_fv == "33" &
-         (period>=18)) |
+      .urban_code = suppressWarnings(
+        as.integer(as.character(.data[[urban_var]]))
+      ),
 
-        # State 24, District 25: 2022 Q1 onwards
-        (state_per_fv == "24" &
-        b1q4_per_fv == "25" &
-         (period>=19))
-      ) ~ 1,
+      .state_code_treatment = suppressWarnings(
+        as.integer(as.character(.data[[state_var]]))
+      ),
 
-      TRUE ~ 0
+      .district_code_treatment = suppressWarnings(
+        as.integer(as.character(.data[[district_var]]))
+      ),
+
+
+      # ----------------------------------------------------------
+      # Harmonised Census-2011 city-size stratum
+      #
+      # The appropriate raw field is supplied separately for
+      # each survey wave below.
+      # ----------------------------------------------------------
+
+      city_size_stratum = suppressWarnings(
+        as.integer(as.character(.data[[city_stratum_var]]))
+      ),
+
+
+      # ----------------------------------------------------------
+      # Comparable large-city analysis sample
+      #
+      # This identifies urban city strata with a Census-2011
+      # population of at least 15 lakh.
+      # ----------------------------------------------------------
+
+      eligible_city = as.integer(
+        .urban_code == 2L &
+          !is.na(city_size_stratum) &
+          city_size_stratum >= 4L
+      ),
+
+
+      # ----------------------------------------------------------
+      # Metro system label
+      #
+      # Pune includes the Pune/Pimpri-Chinchwad urban system.
+      # ----------------------------------------------------------
+
+      metro_system = case_when(
+
+        .state_code_treatment == 24L &
+          .district_code_treatment == 7L ~
+          "Ahmedabad",
+
+        .state_code_treatment == 27L &
+          .district_code_treatment == 9L ~
+          "Nagpur",
+
+        .state_code_treatment == 9L &
+          .district_code_treatment == 33L ~
+          "Kanpur",
+
+        .state_code_treatment == 27L &
+          .district_code_treatment == 25L ~
+          "Pune-PCMC",
+
+        TRUE ~ NA_character_
+      ),
+
+
+      # ----------------------------------------------------------
+      # PRIMARY COHORT:
+      # first fully exposed quarter
+      #
+      # 0 = never treated
+      # 8 = Ahmedabad and Nagpur: April-June 2019
+      # 19 = Kanpur: January-March 2022
+      # 20 = Pune/PCMC: April-June 2022
+      #
+      # Cohort assignment depends only on the metro district.
+      # The eligible-city restriction is applied separately.
+      # ----------------------------------------------------------
+
+      first_treat = case_when(
+
+        .state_code_treatment == 24L &
+          .district_code_treatment == 7L ~ 8L,
+
+        .state_code_treatment == 27L &
+          .district_code_treatment == 9L ~ 8L,
+
+        .state_code_treatment == 9L &
+          .district_code_treatment == 33L ~ 19L,
+
+        .state_code_treatment == 27L &
+          .district_code_treatment == 25L ~ 20L,
+
+        TRUE ~ 0L
+      ),
+
+
+      # ----------------------------------------------------------
+      # SENSITIVITY COHORT:
+      # quarter in which the metro opened
+      #
+      # 7 = Ahmedabad and Nagpur
+      # 18 = Kanpur
+      # 19 = Pune/PCMC
+      # ----------------------------------------------------------
+
+      first_treat_opening_quarter = case_when(
+
+        .state_code_treatment == 24L &
+          .district_code_treatment == 7L ~ 7L,
+
+        .state_code_treatment == 27L &
+          .district_code_treatment == 9L ~ 7L,
+
+        .state_code_treatment == 9L &
+          .district_code_treatment == 33L ~ 18L,
+
+        .state_code_treatment == 27L &
+          .district_code_treatment == 25L ~ 19L,
+
+        TRUE ~ 0L
+      ),
+
+
+      # ----------------------------------------------------------
+      # PRIMARY BINARY TREATMENT
+      #
+      # Smaller towns and rural areas inside the four districts
+      # are not treated in this city-level specification.
+      # ----------------------------------------------------------
+
+      Treatment = case_when(
+
+        is.na(period) ~ NA_integer_,
+
+        eligible_city == 1L &
+          first_treat > 0L &
+          period >= first_treat ~ 1L,
+
+        TRUE ~ 0L
+      ),
+
+
+      # ----------------------------------------------------------
+      # OPENING-QUARTER SENSITIVITY TREATMENT
+      # ----------------------------------------------------------
+
+      Treatment_opening_quarter = case_when(
+
+        is.na(period) ~ NA_integer_,
+
+        eligible_city == 1L &
+          first_treat_opening_quarter > 0L &
+          period >= first_treat_opening_quarter ~ 1L,
+
+        TRUE ~ 0L
+      )
+
+    ) %>%
+
+    # Remove temporary harmonisation variables
+    select(
+      -.urban_code,
+      -.state_code_treatment,
+      -.district_code_treatment
     )
+}
+
+
+# ================================================================
+# APPLY THE TREATMENT FUNCTION TO EACH SURVEY WAVE
+# ================================================================
+
+
+# 2017-18
+# In the early files, b1q6 contains the effective urban
+# city-size stratum.
+analysis17_18 <- add_metro_treatment(
+  df                = analysis17_18,
+  urban_var         = "b1q3_per_fv",
+  city_stratum_var  = "b1q6_per_fv",
+  state_var         = "state_per_fv",
+  district_var      = "b1q4_per_fv"
+)
+
+
+# 2018-19
+analysis18_19 <- add_metro_treatment(
+  df                = analysis18_19,
+  urban_var         = "b1q3_per_fv",
+  city_stratum_var  = "b1q6_per_fv",
+  state_var         = "state_per_fv",
+  district_var      = "b1q4_per_fv"
+)
+
+
+# 2019-20
+analysis19_20 <- add_metro_treatment(
+  df                = analysis19_20,
+  urban_var         = "b1q3_per_fv",
+  city_stratum_var  = "b1q6_per_fv",
+  state_var         = "state_per_fv",
+  district_var      = "b1q4_per_fv"
+)
+
+
+# 2020-21
+analysis20_21 <- add_metro_treatment(
+  df                = analysis20_21,
+  urban_var         = "b1q3_perv1",
+  city_stratum_var  = "b1q6_perv1",
+  state_var         = "state_perv1",
+  district_var      = "distcode_perv1"
+)
+
+
+# 2021-22
+# From this wave onward, b1q5 contains the urban
+# city-size stratum.
+analysis21_22 <- add_metro_treatment(
+  df                = analysis21_22,
+  urban_var         = "b1q3_perv1",
+  city_stratum_var  = "b1q5_perv1",
+  state_var         = "state_perv1",
+  district_var      = "distcode_perv1"
+)
+
+
+# July 2022 to December 2023
+analysis22Jul_23Dec <- add_metro_treatment(
+  df                = analysis22Jul_23Dec,
+  urban_var         = "b1q3_perv1",
+  city_stratum_var  = "b1q5_perv1",
+  state_var         = "state_perv1",
+  district_var      = "distcode_perv1"
+)
+
+
+# Calendar year 2024
+analysis24 <- add_metro_treatment(
+  df                = analysis24,
+  urban_var         = "Sector",
+  city_stratum_var  = "Stratum",
+  state_var         = "State_UT_Code",
+  district_var      = "District_Code"
+)
+
+
+# ================================================================
+# BASIC VALIDATION CHECKS
+# ================================================================
+
+treatment_dataframes <- list(
+  "2017-18" = analysis17_18,
+  "2018-19" = analysis18_19,
+  "2019-20" = analysis19_20,
+  "2020-21" = analysis20_21,
+  "2021-22" = analysis21_22,
+  "2022-23" = analysis22Jul_23Dec,
+  "2024"    = analysis24
+)
+
+
+# Confirm that treatment is never assigned outside the eligible
+# urban large-city sample.
+invisible(
+  lapply(
+    treatment_dataframes,
+    function(x) {
+
+      stopifnot(
+        !any(
+          x$Treatment == 1L &
+            x$eligible_city != 1L,
+          na.rm = TRUE
+        )
+      )
+
+      stopifnot(
+        !any(
+          x$Treatment_opening_quarter == 1L &
+            x$eligible_city != 1L,
+          na.rm = TRUE
+        )
+      )
+    }
   )
+)
 
-analysis20_21 <- analysis20_21 %>%
-  mutate(
-    Treatment = case_when(
 
-      # Must be urban
-      b1q3_perv1 == "2" &
+# Unweighted person-row diagnostic.
+# These counts are only cleaning checks; they are not estimates.
+treatment_diagnostic <- bind_rows(
+  lapply(
+    names(treatment_dataframes),
+    function(wave_name) {
 
-      (
-        # State 24, District 7: 2019 Q1 onwards
-        (state_perv1 == "24" &
-         distcode_perv1 == "07" &
-         (period>=7)) |
+      x <- treatment_dataframes[[wave_name]]
 
-        # State 27, District 9: 2019 Q1 onwards
-        (state_perv1== "27" &
-         distcode_perv1 == "09" &
-         (period>=7)) |
-
-        # State 9, District 33: 2021 Q4 onwards
-        (state_perv1 == "09" &
-         distcode_perv1 == "33" &
-         (period>=18)) |
-
-        # State 24, District 25: 2022 Q1 onwards
-        (state_perv1 == "24" &
-         distcode_perv1 == "25" &
-         (period>=19))
-      ) ~ 1,
-
-      TRUE ~ 0
-    )
+      tibble(
+        survey_wave = wave_name,
+        total_rows = nrow(x),
+        eligible_large_city_rows =
+          sum(x$eligible_city == 1L, na.rm = TRUE),
+        primary_treated_rows =
+          sum(x$Treatment == 1L, na.rm = TRUE),
+        opening_quarter_treated_rows =
+          sum(x$Treatment_opening_quarter == 1L, na.rm = TRUE)
+      )
+    }
   )
+)
 
-analysis21_22 <- analysis21_22 %>%
-  mutate(
-    Treatment = case_when(
+print(treatment_diagnostic)
 
-      # Must be urban
-      b1q3_perv1 == "2" &
 
-      (
-        # State 24, District 7: 2019 Q1 onwards
-        (state_perv1 == "24" &
-         distcode_perv1== "07" &
-         (period>=7)) |
-
-        # State 27, District 9: 2019 Q1 onwards
-        (state_perv1 == "27" &
-         distcode_perv1 == "09" &
-         (period>=7)) |
-
-        # State 9, District 33: 2021 Q4 onwards
-        (state_perv1 == "09" &
-        distcode_perv1 == "33" &
-         (period>=18)) |
-
-        # State 24, District 25: 2022 Q1 onwards
-        (state_perv1== "24" &
-         distcode_perv1 == "25" &
-         (period>=19))
-      ) ~ 1,
-
-      TRUE ~ 0
-    )
-  )
-
-analysis22Jul_23Dec <- analysis22Jul_23Dec %>%
-  mutate(
-    Treatment = case_when(
-
-      # Must be urban
-      b1q3_perv1 == "2" &
-
-      (
-        # State 24, District 7: 2019 Q1 onwards
-        (state_perv1 == "24" &
-         distcode_perv1 == "07" &
-         (period>=7)) |
-
-        # State 27, District 9: 2019 Q1 onwards
-        (state_perv1 == "27" &
-         distcode_perv1 == "09" &
-         (period>=7)) |
-
-        # State 9, District 33: 2021 Q4 onwards
-        (state_perv1 == "09" &
-         distcode_perv1 == "33" &
-         (period>=18)) |
-
-        # State 24, District 25: 2022 Q1 onwards
-        (state_perv1 == "24" &
-         distcode_perv1 == "25" &
-         (period>=19))
-      ) ~ 1,
-
-      TRUE ~ 0
-    )
-  )
-
-analysis24 <- analysis24 %>%
-  mutate(
-    Treatment = case_when(
-
-      # Must be urban
-      Sector == "2" &
-
-      (
-        # State 24, District 7: 2019 Q1 onwards
-        (State_UT_Code == "24" &
-         District_Code == "07" &
-         (period>=7)) |
-
-        # State 27, District 9: 2019 Q1 onwards
-        (State_UT_Code == "27" &
-         District_Code == "09" &
-         (period>=7)) |
-
-        # State 9, District 33: 2021 Q4 onwards
-        (State_UT_Code == "09" &
-         District_Code == "33" &
-         (period>=18)) |
-
-        # State 24, District 25: 2022 Q1 onwards
-        (State_UT_Code== "24" &
-         District_Code == "25" &
-         (period>=19))
-      ) ~ 1,
-
-      TRUE ~ 0
-    )
-  )
-
+# ================================================================
+# IMPORTANT FOR THE FINAL DiD DATA
+# ================================================================
+#
+# Do not filter the analysis dataframes at this point because the
+# survey-weight calculations later in the cleaning file require the
+# complete survey sample.
+#
+# After the weights have been constructed, the final DiD dataset
+# must be restricted as follows:
+#
+#     filter(eligible_city == 1L)
+#
+# Section 8 should retain the variables created here:
+#
+#     city_size_stratum
+#     eligible_city
+#     metro_system
+#     first_treat
+#     first_treat_opening_quarter
+#     Treatment
+#     Treatment_opening_quarter
+#
+# It should not recreate city eligibility or first_treat from the
+# original b1q5 variable.
+#
+# Also remember that the informal-employment outcome uses usual
+# principal status and therefore refers to the preceding 365 days.
+# The early post-treatment quarters should consequently be
+# interpreted as transition periods.
+# ================================================================
 
 
 sum(analysis17_18$Treatment=="1" & analysis17_18$transport=="1" & analysis17_18$informal=="1",na.rm=TRUE)
@@ -801,7 +989,717 @@ sum(analysis24$Treatment=="1" & analysis24$transport=="1" & analysis24$informal=
 
 ```
 
-4.Weight for each person
+4.Already Treated Variables
+```{r}
+#2017
+
+analysis17_18$NotControl <- 0
+
+# Ernakulam
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "32" &
+  analysis17_18$b1q4_per_fv == "8"
+] <- 1
+
+# Chennai
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "33" &
+  analysis17_18$b1q4_per_fv == "2"
+] <- 1
+
+# Bengaluru Urban
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "29" &
+  analysis17_18$b1q4_per_fv == "18"
+] <- 1
+
+# Hyderabad
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "36" &
+  (
+    (analysis17_18$period < 9 &
+       analysis17_18$b1q4_per_fv == "5") |
+      
+    (analysis17_18$period >= 9 &
+       analysis17_18$b1q4_per_fv == "22")
+  )
+] <- 1
+
+# Mumbai Suburban
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "27" &
+  analysis17_18$b1q4_per_fv == "22"
+] <- 1
+
+# Kolkata
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "19" &
+  analysis17_18$b1q4_per_fv == "16"
+] <- 1
+
+# Jaipur
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "8" &
+  analysis17_18$b1q4_per_fv == "12"
+] <- 1
+
+# Agra
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "9" &
+  analysis17_18$b1q4_per_fv == "15"
+] <- 1
+
+# Lucknow
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "9" &
+  analysis17_18$b1q4_per_fv == "26"
+] <- 1
+
+# All Delhi
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "7"
+] <- 1
+
+# Gurugram
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "6" &
+  analysis17_18$b1q4_per_fv == "18"
+] <- 1
+
+# Faridabad
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "6" &
+  analysis17_18$b1q4_per_fv == "20"
+] <- 1
+
+# Gautam Buddha Nagar
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "9" &
+  analysis17_18$b1q4_per_fv == "10"
+] <- 1
+
+# Ghaziabad
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "9" &
+  analysis17_18$b1q4_per_fv == "9"
+] <- 1
+
+# Haryana - Jhajjar
+analysis17_18$NotControl[
+  analysis17_18$state_per_fv == "6" &
+  analysis17_18$b1q4_per_fv == "15"
+] <- 1
+
+
+
+#2018
+analysis18_19$NotControl <- 0
+
+# Ernakulam
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "32" &
+  analysis18_19$b1q4_per_fv == "8"
+] <- 1
+
+# Chennai
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "33" &
+  analysis18_19$b1q4_per_fv == "2"
+] <- 1
+
+# Bengaluru Urban
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "29" &
+  analysis18_19$b1q4_per_fv == "18"
+] <- 1
+
+# Hyderabad
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "36" &
+  (
+    (analysis18_19$period < 9 &
+       analysis18_19$b1q4_per_fv == "5") |
+      
+    (analysis18_19$period >= 9 &
+       analysis18_19$b1q4_per_fv == "22")
+  )
+] <- 1
+
+# Mumbai Suburban
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "27" &
+  analysis18_19$b1q4_per_fv == "22"
+] <- 1
+
+# Kolkata
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "19" &
+  analysis18_19$b1q4_per_fv == "16"
+] <- 1
+
+# Jaipur
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "8" &
+  analysis18_19$b1q4_per_fv == "12"
+] <- 1
+
+# Agra
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "9" &
+  analysis18_19$b1q4_per_fv == "15"
+] <- 1
+
+# Lucknow
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "9" &
+  analysis18_19$b1q4_per_fv == "26"
+] <- 1
+
+# All Delhi
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "7"
+] <- 1
+
+# Gurugram
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "6" &
+  analysis18_19$b1q4_per_fv == "18"
+] <- 1
+
+# Faridabad
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "6" &
+  analysis18_19$b1q4_per_fv == "20"
+] <- 1
+
+# Gautam Buddha Nagar
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "9" &
+  analysis18_19$b1q4_per_fv == "10"
+] <- 1
+
+# Ghaziabad
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "9" &
+  analysis18_19$b1q4_per_fv == "9"
+] <- 1
+
+# Haryana - Jhajjar
+analysis18_19$NotControl[
+  analysis18_19$state_per_fv == "6" &
+  analysis18_19$b1q4_per_fv == "15"
+] <- 1
+
+
+
+#2019
+analysis19_20$NotControl <- 0
+
+# Ernakulam
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "32" &
+  analysis19_20$b1q4_per_fv == "8"
+] <- 1
+
+# Chennai
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "33" &
+  analysis19_20$b1q4_per_fv == "2"
+] <- 1
+
+# Bengaluru Urban
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "29" &
+  analysis19_20$b1q4_per_fv == "18"
+] <- 1
+
+# Hyderabad
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "36" &
+  (
+    (analysis19_20$period < 9 &
+       analysis19_20$b1q4_per_fv == "5") |
+      
+    (analysis19_20$period >= 9 &
+       analysis19_20$b1q4_per_fv == "22")
+  )
+] <- 1
+
+# Mumbai Suburban
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "27" &
+  analysis19_20$b1q4_per_fv == "22"
+] <- 1
+
+# Kolkata
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "19" &
+  analysis19_20$b1q4_per_fv == "16"
+] <- 1
+
+# Jaipur
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "8" &
+  analysis19_20$b1q4_per_fv == "12"
+] <- 1
+
+# Agra
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "9" &
+  analysis19_20$b1q4_per_fv == "15"
+] <- 1
+
+# Lucknow
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "9" &
+  analysis19_20$b1q4_per_fv == "26"
+] <- 1
+
+# All Delhi
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "7"
+] <- 1
+
+# Gurugram
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "6" &
+  analysis19_20$b1q4_per_fv == "18"
+] <- 1
+
+# Faridabad
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "6" &
+  analysis19_20$b1q4_per_fv == "20"
+] <- 1
+
+# Gautam Buddha Nagar
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "9" &
+  analysis19_20$b1q4_per_fv == "10"
+] <- 1
+
+# Ghaziabad
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "9" &
+  analysis19_20$b1q4_per_fv == "9"
+] <- 1
+
+# Haryana - Jhajjar
+analysis19_20$NotControl[
+  analysis19_20$state_per_fv == "6" &
+  analysis19_20$b1q4_per_fv == "15"
+] <- 1
+
+
+
+#2020
+analysis20_21$NotControl <- 0
+
+# Ernakulam
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "32" &
+  analysis20_21$distcode_perv1 == "8"
+] <- 1
+
+# Chennai
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "33" &
+  analysis20_21$distcode_perv1 == "2"
+] <- 1
+
+# Bengaluru Urban
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "29" &
+  analysis20_21$distcode_perv1 == "18"
+] <- 1
+
+# Hyderabad
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "36" &
+  (
+    (analysis20_21$period < 9 &
+       analysis20_21$distcode_perv1 == "5") |
+      
+    (analysis20_21$period >= 9 &
+       analysis20_21$distcode_perv1 == "22")
+  )
+] <- 1
+
+# Mumbai Suburban
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "27" &
+  analysis20_21$distcode_perv1 == "22"
+] <- 1
+
+# Kolkata
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "19" &
+  analysis20_21$distcode_perv1 == "16"
+] <- 1
+
+# Jaipur
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "8" &
+  analysis20_21$distcode_perv1 == "12"
+] <- 1
+
+# Agra
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "9" &
+  analysis20_21$distcode_perv1 == "15"
+] <- 1
+
+# Lucknow
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "9" &
+  analysis20_21$distcode_perv1 == "26"
+] <- 1
+
+# All Delhi
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "7"
+] <- 1
+
+# Gurugram
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "6" &
+  analysis20_21$distcode_perv1 == "18"
+] <- 1
+
+# Faridabad
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "6" &
+  analysis20_21$distcode_perv1 == "20"
+] <- 1
+
+# Gautam Buddha Nagar
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "9" &
+  analysis20_21$distcode_perv1 == "10"
+] <- 1
+
+# Ghaziabad
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "9" &
+  analysis20_21$distcode_perv1 == "9"
+] <- 1
+
+# Haryana - Jhajjar
+analysis20_21$NotControl[
+  analysis20_21$state_perv1 == "6" &
+  analysis20_21$distcode_perv1 == "15"
+] <- 1
+
+
+
+#2021
+analysis21_22$NotControl <- 0
+
+# Ernakulam
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "32" &
+  analysis21_22$distcode_perv1 == "8"
+] <- 1
+
+# Chennai
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "33" &
+  analysis21_22$distcode_perv1 == "2"
+] <- 1
+
+# Bengaluru Urban
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "29" &
+  analysis21_22$distcode_perv1 == "18"
+] <- 1
+
+# Hyderabad
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "36" &
+  (
+    (analysis21_22$period < 9 &
+       analysis21_22$distcode_perv1 == "5") |
+      
+    (analysis21_22$period >= 9 &
+       analysis21_22$distcode_perv1 == "22")
+  )
+] <- 1
+
+# Mumbai Suburban
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "27" &
+  analysis21_22$distcode_perv1 == "22"
+] <- 1
+
+# Kolkata
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "19" &
+  analysis21_22$distcode_perv1 == "16"
+] <- 1
+
+# Jaipur
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "8" &
+  analysis21_22$distcode_perv1 == "12"
+] <- 1
+
+# Agra
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "9" &
+  analysis21_22$distcode_perv1 == "15"
+] <- 1
+
+# Lucknow
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "9" &
+  analysis21_22$distcode_perv1 == "26"
+] <- 1
+
+# All Delhi
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "7"
+] <- 1
+
+# Gurugram
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "6" &
+  analysis21_22$distcode_perv1 == "18"
+] <- 1
+
+# Faridabad
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "6" &
+  analysis21_22$distcode_perv1 == "20"
+] <- 1
+
+# Gautam Buddha Nagar
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "9" &
+  analysis21_22$distcode_perv1 == "10"
+] <- 1
+
+# Ghaziabad
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "9" &
+  analysis21_22$distcode_perv1 == "9"
+] <- 1
+
+# Haryana - Jhajjar
+analysis21_22$NotControl[
+  analysis21_22$state_perv1 == "6" &
+  analysis21_22$distcode_perv1 == "15"
+] <- 1
+
+
+
+
+#22
+analysis22Jul_23Dec$NotControl <- 0
+
+# Ernakulam
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "32" &
+  analysis22Jul_23Dec$distcode_perv1 == "8"
+] <- 1
+
+# Chennai
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "33" &
+  analysis22Jul_23Dec$distcode_perv1 == "2"
+] <- 1
+
+# Bengaluru Urban
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "29" &
+  analysis22Jul_23Dec$distcode_perv1 == "18"
+] <- 1
+
+# Hyderabad
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "36" &
+  (
+    (analysis22Jul_23Dec$period < 9 &
+       analysis22Jul_23Dec$distcode_perv1 == "5") |
+      
+    (analysis22Jul_23Dec$period >= 9 &
+       analysis22Jul_23Dec$distcode_perv1 == "22")
+  )
+] <- 1
+
+
+
+# Mumbai Suburban
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "27" &
+  analysis22Jul_23Dec$distcode_perv1 == "22"
+] <- 1
+
+# Kolkata
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "19" &
+  analysis22Jul_23Dec$distcode_perv1 == "16"
+] <- 1
+
+# Jaipur
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "8" &
+  analysis22Jul_23Dec$distcode_perv1 == "12"
+] <- 1
+
+# Agra
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "9" &
+  analysis22Jul_23Dec$distcode_perv1 == "15"
+] <- 1
+
+# Lucknow
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "9" &
+  analysis22Jul_23Dec$distcode_perv1 == "26"
+] <- 1
+
+# All Delhi
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "7"
+] <- 1
+
+# Gurugram
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "6" &
+  analysis22Jul_23Dec$distcode_perv1 == "18"
+] <- 1
+
+# Faridabad
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "6" &
+  analysis22Jul_23Dec$distcode_perv1 == "20"
+] <- 1
+
+# Gautam Buddha Nagar
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "9" &
+  analysis22Jul_23Dec$distcode_perv1 == "10"
+] <- 1
+
+# Ghaziabad
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "9" &
+  analysis22Jul_23Dec$distcode_perv1 == "9"
+] <- 1
+
+
+# Haryana - Jhajjar
+analysis22Jul_23Dec$NotControl[
+  analysis22Jul_23Dec$state_perv1 == "6" &
+  analysis22Jul_23Dec$distcode_perv1 == "15"
+] <- 1
+
+
+
+
+#24
+analysis24$NotControl <- 0
+
+# Ernakulam
+analysis24$NotControl[
+  analysis24$State_UT_Code == "32" &
+  analysis24$District_Code == "8"
+] <- 1
+
+# Chennai
+analysis24$NotControl[
+  analysis24$State_UT_Code == "33" &
+  analysis24$District_Code == "2"
+] <- 1
+
+# Bengaluru Urban
+analysis24$NotControl[
+  analysis24$State_UT_Code == "29" &
+  analysis24$District_Code == "18"
+] <- 1
+
+# Hyderabad
+analysis24$NotControl[
+  analysis24$State_UT_Code == "36" &
+  (
+    (analysis24$period < 9 &
+       analysis24$District_Code == "5") |
+      
+    (analysis24$period >= 9 &
+       analysis24$District_Code == "22")
+  )
+] <- 1
+
+# Mumbai Suburban
+analysis24$NotControl[
+  analysis24$State_UT_Code == "27" &
+  analysis24$District_Code == "22"
+] <- 1
+
+# Kolkata
+analysis24$NotControl[
+  analysis24$State_UT_Code == "19" &
+  analysis24$District_Code == "16"
+] <- 1
+
+# Jaipur
+analysis24$NotControl[
+  analysis24$State_UT_Code == "8" &
+  analysis24$District_Code == "12"
+] <- 1
+
+# Agra
+analysis24$NotControl[
+  analysis24$State_UT_Code == "9" &
+  analysis24$District_Code == "15"
+] <- 1
+
+# Lucknow
+analysis24$NotControl[
+  analysis24$State_UT_Code == "9" &
+  analysis24$District_Code == "26"
+] <- 1
+
+# All Delhi
+analysis24$NotControl[
+  analysis24$State_UT_Code == "7"
+] <- 1
+
+# Gurugram
+analysis24$NotControl[
+  analysis24$State_UT_Code == "6" &
+  analysis24$District_Code == "18"
+] <- 1
+
+# Faridabad
+analysis24$NotControl[
+  analysis24$State_UT_Code == "6" &
+  analysis24$District_Code == "20"
+] <- 1
+
+# Gautam Buddha Nagar
+analysis24$NotControl[
+  analysis24$State_UT_Code == "9" &
+  analysis24$District_Code == "10"
+] <- 1
+
+# Ghaziabad
+analysis24$NotControl[
+  analysis24$State_UT_Code == "9" &
+  analysis24$District_Code == "9"
+] <- 1
+
+# Haryana - Jhajjar
+analysis24$NotControl[
+  analysis24$State_UT_Code == "6" &
+  analysis24$District_Code == "15"
+] <- 1
+
+
+```
+
+
+5.Weight for each person
 ```{r}
 library(dplyr)
 
@@ -886,5855 +1784,1965 @@ analysis24 <- analysis24 %>%
         Subsample_Multiplier / 200
     )
   )
+
+
+
 ```
 
 
-
-
-
-
-
-
-
-Function for cleaning the dataset, so that the stata labels don't interfere with the data cleaning process.
+6.District/State identifier
 ```{r}
-# ============================================================
-# CLEAN PLFS CODE VARIABLES
-# ============================================================
+# ================================================================
+# PLFS DISTRICT UID HARMONISATION: 2017-18 TO 2024
+# ================================================================
 
-clean_code <- function(x) {
+library(dplyr)
+library(tibble)
+library(purrr)
 
-  # Remove Stata value labels while preserving underlying codes
-  if (
-    inherits(x, "haven_labelled") ||
-    inherits(x, "labelled")
-  ) {
-    x <- haven::zap_labels(x)
-  }
 
-  # Prevent factors from being converted to their level numbers
+# ================================================================
+# 1. DATASET + VARIABLE CONFIGURATION
+# ================================================================
+#
+# Variable names differ across PLFS waves.
+#
+# 2017-18 to 2019-20:
+#   state_per_fv
+#   b1q4_per_fv
+#
+# 2020-21 to 2022/23:
+#   state_perv1
+#   distcode_perv1
+#
+# 2024:
+#   STATE_UT_Code
+#   District_Code
+#
+# ================================================================
+
+code_vars <- tribble(
+  ~dataset,                ~period,    ~state_var,        ~district_var,      ~baseline,
+  
+  "analysis17_18",         "2017-18",  "state_per_fv",    "b1q4_per_fv",      TRUE,
+  "analysis18_19",         "2018-19",  "state_per_fv",    "b1q4_per_fv",      TRUE,
+  
+  "analysis19_20",         "2019-20",  "state_per_fv",    "b1q4_per_fv",      FALSE,
+  
+  "analysis20_21",         "2020-21",  "state_perv1",     "distcode_perv1",   FALSE,
+  "analysis21_22",         "2021-22",  "state_perv1",     "distcode_perv1",   FALSE,
+  "analysis22Jul_23Dec",   "2022-23",  "state_perv1",     "distcode_perv1",   FALSE,
+  
+  "analysis24",            "2024",     "State_UT_Code",   "District_Code",    FALSE
+)
+
+
+# ================================================================
+# 2. HELPER FUNCTIONS
+# ================================================================
+
+safe_integer <- function(x) {
+  
   if (is.factor(x)) {
     x <- as.character(x)
   }
-
-  # Clean character-formatted codes
-  if (is.character(x)) {
-
-    x <- trimws(x)
-
-    x[
-      x %in% c(
-        "",
-        "NA",
-        "N.A.",
-        "NaN",
-        "NULL",
-        "-",
-        "--"
-      )
-    ] <- NA_character_
-
-    # Convert values such as "31.0" to "31"
-    x <- sub(
-      "\\.0+$",
-      "",
-      x
-    )
-  }
-
-  suppressWarnings(
-    as.numeric(x)
-  )
+  
+  suppressWarnings(as.integer(x))
 }
 
 
-# ============================================================
-# CLEAN NIC INDUSTRY CODES
-#
-# Retains whether the original code was recorded at:
-#   4-digit level, e.g. 4921
-#   5-digit level, e.g. 49213
-#
-# This is necessary because a four-digit 4921 code cannot
-# distinguish buses from trams or metro rail.
-# ============================================================
-
-clean_nic_code <- function(x) {
-
-  # Remove Stata value labels while preserving underlying codes
-  if (
-    inherits(x, "haven_labelled") ||
-      inherits(x, "labelled")
-  ) {
-    x <- haven::zap_labels(x)
-  }
-
-  # Prevent factors being converted to factor-level numbers
-  if (is.factor(x)) {
-    x <- as.character(x)
-  }
-
-  x <- trimws(
-    as.character(x)
-  )
-
-  x[
-    x %in% c(
-      "",
-      "NA",
-      "N.A.",
-      "NaN",
-      "NULL",
-      "-",
-      "--"
-    )
-  ] <- NA_character_
-
-  # Remove decimal suffixes created during CSV import
-  x <- sub(
-    "\\.0+$",
-    "",
-    x
-  )
-
-  # Remove spaces and other non-numeric characters
-  x <- gsub(
-    "[^0-9]",
-    "",
-    x
-  )
-
-  # Blank strings created by cleaning become missing
-  x[
-    x == ""
-  ] <- NA_character_
-
-  # Only accept four- or five-digit NIC codes
-  x[
-    !is.na(x) &
-      !(nchar(x) %in% c(4L, 5L))
-  ] <- NA_character_
-
-  x
-}
-
-
-# ============================================================
-# CREATE NON-METRO TRANSPORT AND INFORMAL-EMPLOYMENT VARIABLES
-#
-# Main variables created:
-#
-# transport
-#   1 = non-metro passenger land transport worker
-#   0 = not a non-metro passenger transport worker
-#  NA = insufficient NIC detail to determine status
-#
-# metro_worker
-#   1 = NIC 49213
-#
-# tram_worker
-#   1 = NIC 49212
-#
-# passenger_land_transport_broad
-#   1 = any NIC beginning 4921 or 4922, including metro/tram
-#
-# informal_transport
-#   1 = informal AND non-metro passenger transport
-# ============================================================
-
-make_informal_transport <- function(
-    data,
-    columns,
-    dataset_name = "dataset"
-) {
-
-  # ----------------------------------------------------------
-  # Check that the column mapping contains all required keys
-  # ----------------------------------------------------------
-
-  required_keys <- c(
-    "pas",
-    "nic",
-    "enterprise",
-    "enterprise_size",
-    "social_security"
-  )
-
-  missing_keys <- setdiff(
-    required_keys,
-    names(columns)
-  )
-
-  if (length(missing_keys) > 0L) {
-
-    stop(
-      paste0(
-        dataset_name,
-        " column mapping is missing: ",
-        paste(
-          missing_keys,
-          collapse = ", "
-        )
-      )
-    )
-  }
-
-
-  mapped_columns <- unname(
-    unlist(
-      columns[required_keys]
-    )
-  )
-
-
-  # ----------------------------------------------------------
-  # Check that all mapped variables exist
-  # ----------------------------------------------------------
-
-  missing_columns <- setdiff(
-    mapped_columns,
-    names(data)
-  )
-
-  if (length(missing_columns) > 0L) {
-
-    stop(
-      paste0(
-        dataset_name,
-        " is missing the following variables: ",
-        paste(
-          missing_columns,
-          collapse = ", "
-        )
-      )
-    )
-  }
-
-
-  rows_before <- nrow(data)
-
-
-  # ----------------------------------------------------------
-  # Extract and clean the required variables
-  # ----------------------------------------------------------
-
-  pas <- clean_code(
-    data[[columns[["pas"]]]]
-  )
-
-  nic_code_clean <- clean_nic_code(
-    data[[columns[["nic"]]]]
-  )
-
-  enterprise <- clean_code(
-    data[[columns[["enterprise"]]]]
-  )
-
-  enterprise_size <- clean_code(
-    data[[columns[["enterprise_size"]]]]
-  )
-
-  social_security <- clean_code(
-    data[[columns[["social_security"]]]]
-  )
-
-
-  # ----------------------------------------------------------
-  # Construct four- and five-digit NIC versions
-  # ----------------------------------------------------------
-
-  nic_code_digits <- ifelse(
-    is.na(nic_code_clean),
-    NA_integer_,
-    nchar(nic_code_clean)
-  )
-
-
-  nic4 <- ifelse(
-    is.na(nic_code_clean),
+make_raw_key <- function(state, district) {
+  
+  ifelse(
+    is.na(state) | is.na(district),
     NA_character_,
-    substr(
-      nic_code_clean,
-      1,
-      4
-    )
-  )
-
-
-  nic5 <- ifelse(
-    nic_code_digits == 5L,
-    nic_code_clean,
-    NA_character_
-  )
-
-
-  # ----------------------------------------------------------
-  # Employment status
-  # ----------------------------------------------------------
-
-  employed_status <- pas %in% c(
-    11,
-    12,
-    21,
-    31,
-    41,
-    51
-  )
-
-
-  # ----------------------------------------------------------
-  # Broad passenger-land-transport indicator
-  #
-  # Includes:
-  #   buses
-  #   taxis
-  #   private-hire vehicles
-  #   other passenger transport
-  #   tramways
-  #   metro/underground/elevated railways
-  # ----------------------------------------------------------
-
-  passenger_land_transport_broad <- case_when(
-
-    is.na(pas) ~
-      NA_integer_,
-
-    !employed_status ~
-      0L,
-
-    employed_status &
-      is.na(nic4) ~
-      NA_integer_,
-
-    nic4 %in% c(
-      "4921",
-      "4922"
-    ) ~
-      1L,
-
-    TRUE ~
-      0L
-  )
-
-
-  # ----------------------------------------------------------
-  # Metro worker
-  #
-  # NIC 49213:
-  # Urban/suburban underground or elevated railways
-  #
-  # A four-digit 4921 code is ambiguous because it could be:
-  #   49211 bus
-  #   49212 tram
-  #   49213 metro
-  #   49219 other passenger transport
-  # ----------------------------------------------------------
-
-  metro_worker_status <- case_when(
-
-    is.na(pas) ~
-      NA_integer_,
-
-    !employed_status ~
-      0L,
-
-    employed_status &
-      is.na(nic_code_clean) ~
-      NA_integer_,
-
-    nic5 == "49213" ~
-      1L,
-
-    nic_code_digits == 4L &
-      nic4 == "4921" ~
-      NA_integer_,
-
-    TRUE ~
-      0L
-  )
-
-
-  # ----------------------------------------------------------
-  # Tram worker
-  #
-  # NIC 49212:
-  # Urban/suburban tramways
-  # ----------------------------------------------------------
-
-  tram_worker_status <- case_when(
-
-    is.na(pas) ~
-      NA_integer_,
-
-    !employed_status ~
-      0L,
-
-    employed_status &
-      is.na(nic_code_clean) ~
-      NA_integer_,
-
-    nic5 == "49212" ~
-      1L,
-
-    nic_code_digits == 4L &
-      nic4 == "4921" ~
-      NA_integer_,
-
-    TRUE ~
-      0L
-  )
-
-
-  # ----------------------------------------------------------
-  # Non-metro passenger-transport worker
-  #
-  # Included five-digit NIC codes:
-  #
-  # 49211 = urban/suburban passenger buses
-  # 49219 = other urban/suburban passenger transport
-  # 49221 = long-distance buses
-  # 49222 = charter/coach services
-  # 49223 = private cars with drivers
-  # 49224 = taxi operation
-  # 49225 = school/employee buses
-  # 49226 = human/animal-drawn passenger vehicles
-  # 49229 = other non-urban passenger transport
-  #
-  # Excluded:
-  #
-  # 49212 = tramways
-  # 49213 = metro/underground/elevated railway
-  # ----------------------------------------------------------
-
-  non_metro_transport_codes <- c(
-    "49211",
-    "49219",
-    "49221",
-    "49222",
-    "49223",
-    "49224",
-    "49225",
-    "49226",
-    "49229"
-  )
-
-
-  transport_status <- case_when(
-
-    # PAS is unavailable
-    is.na(pas) ~
-      NA_integer_,
-
-
-    # Known non-employed observation
-    !employed_status ~
-      0L,
-
-
-    # Employed but NIC is unavailable or malformed
-    employed_status &
-      is.na(nic_code_clean) ~
-      NA_integer_,
-
-
-    # Exact five-digit non-metro transport code
-    nic5 %in%
-      non_metro_transport_codes ~
-      1L,
-
-
-    # Explicitly exclude tram and metro workers
-    nic5 %in% c(
-      "49212",
-      "49213"
-    ) ~
-      0L,
-
-
-    # Four-digit 4922 is safe to include because its
-    # subclasses are non-metro passenger land transport
-    nic_code_digits == 4L &
-      nic4 == "4922" ~
-      1L,
-
-
-    # Four-digit 4921 cannot distinguish bus from metro/tram
-    nic_code_digits == 4L &
-      nic4 == "4921" ~
-      NA_integer_,
-
-
-    # Employed in another known industry
-    TRUE ~
-      0L
-  )
-
-
-  # ----------------------------------------------------------
-  # Informal employment
-  # ----------------------------------------------------------
-
-  informal_status <- case_when(
-
-    # PAS cannot be identified
-    is.na(pas) ~
-      NA_integer_,
-
-
-    # --------------------------------------------------------
-    # Wage or casual employees
-    # --------------------------------------------------------
-
-    pas %in% c(
-      31,
-      41,
-      51
-    ) &
-      social_security == 8 ~
-      1L,
-
-
-    pas %in% c(
-      31,
-      41,
-      51
-    ) &
-      social_security %in% 1:7 ~
-      0L,
-
-
-    # Employee but social-security status is unavailable
-    pas %in% c(
-      31,
-      41,
-      51
-    ) ~
-      NA_integer_,
-
-
-    # --------------------------------------------------------
-    # Unpaid household helpers
-    # --------------------------------------------------------
-
-    pas == 21 ~
-      1L,
-
-
-    # --------------------------------------------------------
-    # Own-account workers and employers
-    # --------------------------------------------------------
-
-    pas %in% c(
-      11,
-      12
-    ) &
-      enterprise %in% c(
-        1,
-        2,
-        3,
-        4
-      ) &
-      enterprise_size %in% c(
-        1,
-        2
-      ) ~
-      1L,
-
-
-    # Known enterprise type outside the informal definition
-    pas %in% c(
-      11,
-      12
-    ) &
-      !is.na(enterprise) &
-      !(enterprise %in% c(
-        1,
-        2,
-        3,
-        4
-      )) ~
-      0L,
-
-
-    # Known enterprise size outside the informal definition
-    pas %in% c(
-      11,
-      12
-    ) &
-      !is.na(enterprise_size) &
-      !(enterprise_size %in% c(
-        1,
-        2
-      )) ~
-      0L,
-
-
-    # Self-employed but insufficient information to classify
-    pas %in% c(
-      11,
-      12
-    ) ~
-      NA_integer_,
-
-
-    # Known non-employed status
-    TRUE ~
-      0L
-  )
-
-
-  # ----------------------------------------------------------
-  # Informal non-metro passenger transport
-  # ----------------------------------------------------------
-
-  informal_transport_status <- case_when(
-
-    # Definitely not a non-metro transport worker
-    transport_status == 0L ~
-      0L,
-
-    # Definitely not informal
-    informal_status == 0L ~
-      0L,
-
-    # Informal non-metro passenger transport worker
-    transport_status == 1L &
-      informal_status == 1L ~
-      1L,
-
-    # At least one component cannot be classified
-    TRUE ~
-      NA_integer_
-  )
-
-
-  # ----------------------------------------------------------
-  # Add main outcome variables
-  # ----------------------------------------------------------
-
-  data$transport <-
-    transport_status
-
-  data$informal <-
-    informal_status
-
-  data$informal_transport <-
-    informal_transport_status
-
-
-  # ----------------------------------------------------------
-  # Add separate transport-category audit variables
-  # ----------------------------------------------------------
-
-  data$passenger_land_transport_broad <-
-    passenger_land_transport_broad
-
-  data$metro_worker <-
-    metro_worker_status
-
-  data$tram_worker <-
-    tram_worker_status
-
-
-  # ----------------------------------------------------------
-  # Unknown-classification audit variables
-  # ----------------------------------------------------------
-
-  data$transport_unknown <- as.integer(
-    is.na(
-      transport_status
-    )
-  )
-
-  data$informal_unknown <- as.integer(
-    is.na(
-      informal_status
-    )
-  )
-
-  data$informal_transport_unknown <- as.integer(
-    is.na(
-      informal_transport_status
-    )
-  )
-
-  data$metro_worker_unknown <- as.integer(
-    is.na(
-      metro_worker_status
-    )
-  )
-
-
-  # Specifically identifies ambiguous four-digit 4921 codes
-  data$transport_scope_unknown <- as.integer(
-    employed_status &
-      nic_code_digits == 4L &
-      nic4 == "4921"
-  )
-
-  data$transport_scope_unknown[
-    is.na(
-      data$transport_scope_unknown
-    )
-  ] <- 0L
-
-
-  # ----------------------------------------------------------
-  # Retain cleaned NIC variables for auditing
-  # ----------------------------------------------------------
-
-  data$nic_code_clean <-
-    nic_code_clean
-
-  data$nic_code_digits <-
-    nic_code_digits
-
-  data$nic4_clean <-
-    nic4
-
-  data$nic5_clean <-
-    nic5
-
-
-  # ----------------------------------------------------------
-  # Confirm no respondent rows were added or removed
-  # ----------------------------------------------------------
-
-  if (nrow(data) != rows_before) {
-
-    stop(
-      paste(
-        dataset_name,
-        "row count changed while creating outcomes."
-      )
-    )
-  }
-
-
-  # ----------------------------------------------------------
-  # Confirm binary variables contain only 0, 1 or NA
-  # ----------------------------------------------------------
-
-  binary_variables <- c(
-    "transport",
-    "informal",
-    "informal_transport",
-    "passenger_land_transport_broad",
-    "metro_worker",
-    "tram_worker",
-    "transport_unknown",
-    "informal_unknown",
-    "informal_transport_unknown",
-    "metro_worker_unknown",
-    "transport_scope_unknown"
-  )
-
-
-  for (variable_name in binary_variables) {
-
-    invalid_values <- unique(
-      data[[variable_name]][
-        !is.na(data[[variable_name]]) &
-          !(data[[variable_name]] %in% c(
-            0L,
-            1L
-          ))
-      ]
-    )
-
-    if (length(invalid_values) > 0L) {
-
-      stop(
-        paste(
-          dataset_name,
-          "-",
-          variable_name,
-          "contains values other than 0, 1 or NA."
-        )
-      )
-    }
-  }
-
-
-  data
-}
-```
-
-Creating analysis dataset: Finding informal transport workers
-```{r}
-# ============================================================
-# 3. MAP PLFS VARIABLES USED TO IDENTIFY
-#    TRANSPORT AND INFORMAL EMPLOYMENT
-# ============================================================
-
-library(dplyr)
-library(purrr)
-library(tibble)
-
-
-# ------------------------------------------------------------
-# 2017-18
-# ------------------------------------------------------------
-
-columns17_18 <- c(
-  pas = "b5pt1q3_per_fv",
-  nic = "b5pt1q5_per_fv",
-  enterprise = "b5pt1q9_per_fv",
-  enterprise_size = "b5pt1q10_per_fv",
-  social_security = "b5pt1q13_per_fv"
-)
-
-
-# ------------------------------------------------------------
-# 2018-19
-# ------------------------------------------------------------
-
-columns18_19 <- c(
-  pas = "b5pt1q3_per_fv",
-  nic = "b5pt1q5_per_fv",
-  enterprise = "b5pt1q9_per_fv",
-  enterprise_size = "b5pt1q10_per_fv",
-  social_security = "b5pt1q13_per_fv"
-)
-
-
-# ------------------------------------------------------------
-# 2019-20
-# ------------------------------------------------------------
-
-columns19_20 <- c(
-  pas = "b5pt1q3_per_fv",
-  nic = "b5pt1q5_per_fv",
-  enterprise = "b5pt1q9_per_fv",
-  enterprise_size = "b5pt1q10_per_fv",
-  social_security = "b5pt1q13_per_fv"
-)
-
-
-# ------------------------------------------------------------
-# 2020-21
-# ------------------------------------------------------------
-
-columns20_21 <- c(
-  pas = "b5pt1q3_perv1",
-  nic = "b5pt1q5_perv1",
-  enterprise = "b5pt1q9_perv1",
-  enterprise_size = "b5pt1q10_perv1",
-  social_security = "b5pt1q13_perv1"
-)
-
-
-# ------------------------------------------------------------
-# July 2021-June 2022
-#
-# This section is used only if data21_22_fv has been imported.
-# ------------------------------------------------------------
-
-columns21_22 <- c(
-  pas = "b5pt1q3_perv1",
-  nic = "b5pt1q5_perv1",
-  enterprise = "b5pt1q9_perv1",
-  enterprise_size = "b5pt1q10_perv1",
-  social_security = "b5pt1q13_perv1"
-)
-
-
-# ------------------------------------------------------------
-# Calendar year 2022
-# ------------------------------------------------------------
-
-columns22 <- c(
-  pas = "b5pt1q3_cperv1",
-  nic = "b5pt1q5_cperv1",
-  enterprise = "b5pt1q9_cperv1",
-  enterprise_size = "b5pt1q10_cperv1",
-  social_security = "b5pt1q13_cperv1"
-)
-
-
-# ------------------------------------------------------------
-# Calendar year 2023
-# ------------------------------------------------------------
-
-columns23 <- c(
-  pas = "b5pt1q3_cperv1",
-  nic = "b5pt1q5_cperv1",
-  enterprise = "b5pt1q9_cperv1",
-  enterprise_size = "b5pt1q10_cperv1",
-  social_security = "b5pt1q13_cperv1"
-)
-
-
-# ------------------------------------------------------------
-# Calendar year 2024
-# ------------------------------------------------------------
-
-columns24 <- c(
-  pas = "Principal_Status_Code",
-  nic = "Principal_Industry_Code",
-  enterprise = "Principal_Enterprise_Type",
-  enterprise_size = "Principal_Workers_Count",
-  social_security = "Principal_Social_Security"
-)
-
-
-# ------------------------------------------------------------
-# Calendar year 2025
-# ------------------------------------------------------------
-
-columns25 <- c(
-  pas = "pas",
-  nic = "ind_pas",
-  enterprise = "etyp_pas",
-  enterprise_size = "wrkr_pas",
-  social_security = "ssec_pas"
-)
-
-
-# ============================================================
-# 4. CREATE A REGISTRY OF DATASETS AND VARIABLE MAPPINGS
-# ============================================================
-
-outcome_registry <- list(
-  `2017-18` = list(
-    data = data17_18_fv,
-    columns = columns17_18,
-    output_name = "analysis17_18"
-  ),
-
-  `2018-19` = list(
-    data = data18_19_fv,
-    columns = columns18_19,
-    output_name = "analysis18_19"
-  ),
-
-  `2019-20` = list(
-    data = data19_20_fv,
-    columns = columns19_20,
-    output_name = "analysis19_20"
-  ),
-
-  `2020-21` = list(
-    data = data20_21_fv,
-    columns = columns20_21,
-    output_name = "analysis20_21"
-  ),
-
-  `2022` = list(
-    data = data22,
-    columns = columns22,
-    output_name = "analysis22"
-  ),
-
-  `2023` = list(
-    data = data23,
-    columns = columns23,
-    output_name = "analysis23"
-  ),
-
-  `2024` = list(
-    data = data24,
-    columns = columns24,
-    output_name = "analysis24"
-  ),
-
-  `2025` = list(
-    data = data25,
-    columns = columns25,
-    output_name = "analysis25"
-  )
-)
-
-
-# Add the July 2021-June 2022 file if it has been imported
-if (exists("data21_22_fv")) {
-
-  outcome_registry <- append(
-    outcome_registry,
-    list(
-      `2021-22` = list(
-        data = data21_22_fv,
-        columns = columns21_22,
-        output_name = "analysis21_22"
-      )
-    ),
-    after = 4
+    sprintf("%02d-%02d", state, district)
   )
 }
 
 
-# ============================================================
-# 5. AUDIT THE VARIABLE MAPPINGS
-# ============================================================
-
-mapping_audit <- imap_dfr(
-  outcome_registry,
-  function(item, dataset_name) {
-
-    tibble(
-      dataset = dataset_name,
-      variable_role = names(item$columns),
-      source_column = unname(item$columns),
-      column_exists = unname(item$columns) %in%
-        names(item$data)
-    )
-  }
-)
-
-
-print(
-  mapping_audit,
-  n = Inf
-)
-
-
-missing_mapped_columns <- mapping_audit %>%
-  filter(
-    !column_exists
-  )
-
-
-if (nrow(missing_mapped_columns) > 0L) {
-
-  print(
-    missing_mapped_columns,
-    n = Inf
-  )
-
-  stop(
-    paste(
-      "At least one mapped PLFS variable does not exist.",
-      "Correct the source-column name before continuing."
-    )
-  )
-}
-
-
-# ============================================================
-# 6. CREATE EACH ANNUAL ANALYSIS DATASET
-# ============================================================
-
-analysis_results <- imap(
-  outcome_registry,
-  function(item, dataset_name) {
-
-    make_informal_transport(
-      data = item$data,
-      columns = item$columns,
-      dataset_name = dataset_name
-    )
-  }
-)
-
-
-# Save the resulting datasets under their intended object names
-walk2(
-  analysis_results,
-  outcome_registry,
-  function(result, item) {
-
-    assign(
-      x = item$output_name,
-      value = result,
-      envir = .GlobalEnv
-    )
-  }
-)
-
-
-# ============================================================
-# 7. AUDIT THE CREATED OUTCOMES
-# ============================================================
-
-analysis_outcome_audit <- imap_dfr(
-  analysis_results,
-  function(data, dataset_name) {
-
-    tibble(
-      dataset = dataset_name,
-
-      observations = nrow(data),
-
-      transport_workers = sum(
-        data$transport == 1L,
-        na.rm = TRUE
-      ),
-
-      informal_workers = sum(
-        data$informal == 1L,
-        na.rm = TRUE
-      ),
-
-      informal_transport_workers = sum(
-        data$informal_transport == 1L,
-        na.rm = TRUE
-      ),
-
-      transport_unknown = sum(
-        data$transport_unknown == 1L,
-        na.rm = TRUE
-      ),
-
-      informal_unknown = sum(
-        data$informal_unknown == 1L,
-        na.rm = TRUE
-      ),
-
-      informal_transport_unknown = sum(
-        data$informal_transport_unknown == 1L,
-        na.rm = TRUE
-      )
-    )
-  }
-) %>%
-  mutate(
-    transport_rate =
-      transport_workers / observations,
-
-    informal_rate =
-      informal_workers / observations,
-
-    informal_transport_rate =
-      informal_transport_workers / observations,
-
-    transport_unknown_rate =
-      transport_unknown / observations,
-
-    informal_unknown_rate =
-      informal_unknown / observations,
-
-    informal_transport_unknown_rate =
-      informal_transport_unknown / observations
-  )
-
-
-print(
-  analysis_outcome_audit,
-  n = Inf
-)
-
-
-# ============================================================
-# 8. STRICT CHECKS
-# ============================================================
-
-if (any(analysis_outcome_audit$observations == 0L)) {
-
-  stop(
-    "At least one annual analysis dataset has zero observations."
-  )
-}
-
-
-if (any(
-  analysis_outcome_audit$transport_unknown_rate > 0.10,
-  na.rm = TRUE
-)) {
-
-  warning(
-    paste(
-      "At least one year has more than 10% unknown",
-      "transport classifications."
-    )
-  )
-}
-
-
-if (any(
-  analysis_outcome_audit$informal_unknown_rate > 0.10,
-  na.rm = TRUE
-)) {
-
-  warning(
-    paste(
-      "At least one year has more than 10% unknown",
-      "informality classifications."
-    )
-  )
-}
-
-
-message(
-  "Outcome mappings and annual classifications completed."
-)
-```
-
-
-
-Function for adding state identifiers for diff-in-diff
-```{r}
-# ============================================================
-# 8. IMPORT AND ATTACH PANEL-SPECIFIC DISTRICT INFORMATION
-#
-# Matching hierarchy:
-#
-# 1. Match the state/district code against the correct PLFS
-#    panel lookup.
-#
-# 2. For unmatched P4 codes only, search for the exact same
-#    state and district code in the official 2025 lookup.
-#
-# 3. If still unmatched, retain the panel-specific code and
-#    classify the district name as unresolved.
-#
-# No cross-year harmonised district identifier is created here.
-# ============================================================
-
-library(readxl)
-library(dplyr)
-library(purrr)
-library(tibble)
-library(here)
-library(haven)
-
-
-# ============================================================
-# 8.1 AUTOMATICALLY IMPORT A DISTRICT LOOKUP
-#
-# This detects the row containing the actual column headers.
-# It therefore works whether the workbook has title rows above
-# the table or begins directly with the column headings.
-# ============================================================
-
-read_plfs_district_lookup <- function(
-    path,
-    lookup_name
-) {
-
-  if (!file.exists(path)) {
-
-    stop(
-      paste(
-        lookup_name,
-        "was not found at:",
-        path
-      )
-    )
-  }
-
-
-  preview <- read_xlsx(
-    path,
-    col_names = FALSE,
-    n_max = 25,
-    .name_repair = "minimal"
-  )
-
-
-  preview_text <- apply(
-    preview,
-    1,
-    function(row) {
-
-      paste(
-        tolower(
-          trimws(
-            as.character(row)
-          )
-        ),
-        collapse = " | "
-      )
-    }
-  )
-
-
-  # The true header row should mention both state and district
-  possible_header_rows <- which(
-    grepl("state", preview_text) &
-      grepl("district", preview_text)
-  )
-
-
-  if (length(possible_header_rows) == 0L) {
-
-    print(preview)
-
-    stop(
-      paste(
-        "Could not identify the header row in",
-        lookup_name
-      )
-    )
-  }
-
-
-  header_row <- possible_header_rows[1]
-
-
-  lookup_data <- read_xlsx(
-    path,
-    skip = header_row - 1L
-  )
-
-
-  # Remove completely empty columns
-  non_empty_columns <- vapply(
-    lookup_data,
-    function(x) {
-
-      any(
-        !is.na(x) &
-          trimws(
-            as.character(x)
-          ) != ""
-      )
-    },
-    logical(1)
-  )
-
-
-  lookup_data <- lookup_data[
-    ,
-    non_empty_columns,
-    drop = FALSE
-  ]
-
-
-  if (ncol(lookup_data) < 4L) {
-
-    print(
-      names(lookup_data)
-    )
-
-    stop(
-      paste(
-        lookup_name,
-        "contains fewer than four usable columns."
-      )
-    )
-  }
-
-
-  message(
-    lookup_name,
-    ": header detected on row ",
-    header_row,
-    "; imported ",
-    nrow(lookup_data),
-    " rows."
-  )
-
-
-  lookup_data
-}
-
-
-# ============================================================
-# 8.2 IMPORT THE FIVE LOOKUP WORKBOOKS
-# ============================================================
-
-panel1 <- read_plfs_district_lookup(
-  path = here(
-    "Data",
-    "Crosswalks",
-    "PLFS_District_Codes",
-    "17-19.xlsx"
-  ),
-  lookup_name = "Panel 1 lookup"
-)
-
-
-panel2 <- read_plfs_district_lookup(
-  path = here(
-    "Data",
-    "Crosswalks",
-    "PLFS_District_Codes",
-    "19-21.xlsx"
-  ),
-  lookup_name = "Panel 2 lookup"
-)
-
-
-panel3 <- read_plfs_district_lookup(
-  path = here(
-    "Data",
-    "Crosswalks",
-    "PLFS_District_Codes",
-    "21-23.xlsx"
-  ),
-  lookup_name = "Panel 3 lookup"
-)
-
-
-panel4 <- read_plfs_district_lookup(
-  path = here(
-    "Data",
-    "Crosswalks",
-    "PLFS_District_Codes",
-    "23-24.xlsx"
-  ),
-  lookup_name = "Panel 4 lookup"
-)
-
-
-panel2025 <- read_plfs_district_lookup(
-  path = here(
-    "Data",
-    "Crosswalks",
-    "PLFS_District_Codes",
-    "2025.xlsx"
-  ),
-  lookup_name = "2025 lookup"
-)
-
-
-# ============================================================
-# 8.3 CLEAN ONE DISTRICT LOOKUP
-#
-# The function searches the imported column names rather than
-# assuming that the relevant variables are always columns 1–4.
-# ============================================================
-
-prepare_district_lookup <- function(
-    lookup_data,
-    panel_code,
-    lookup_name
-) {
-
-  normalised_column_names <- tolower(
-    gsub(
-      "[^a-z0-9]+",
-      " ",
-      names(lookup_data)
-    )
-  )
-
-
-  state_code_column <- which(
-    grepl("state", normalised_column_names) &
-      grepl("code", normalised_column_names)
-  )
-
-
-  district_code_column <- which(
-    grepl("district", normalised_column_names) &
-      grepl("code", normalised_column_names)
-  )
-
-
-  state_name_column <- which(
-    grepl("state", normalised_column_names) &
-      !grepl("code", normalised_column_names)
-  )
-
-
-  district_name_column <- which(
-    grepl("district", normalised_column_names) &
-      !grepl("code", normalised_column_names)
-  )
-
-
-  # If the names cannot be identified, fall back to the first
-  # four columns in the expected order.
-  if (
-    length(state_code_column) == 0L ||
-      length(state_name_column) == 0L ||
-      length(district_code_column) == 0L ||
-      length(district_name_column) == 0L
-  ) {
-
-    warning(
-      paste(
-        lookup_name,
-        "column names could not be identified automatically;",
-        "using the first four columns."
-      )
-    )
-
-    selected_lookup <- lookup_data[, 1:4]
-
-  } else {
-
-    selected_lookup <- lookup_data[
-      ,
-      c(
-        state_code_column[1],
-        state_name_column[1],
-        district_code_column[1],
-        district_name_column[1]
-      )
-    ]
-  }
-
-
-  names(selected_lookup) <- c(
-    "state_code_source",
-    "State_Name_Panel",
-    "district_code_source",
-    "District_Name_Panel"
-  )
-
-
-  lookup_clean <- selected_lookup %>%
-    mutate(
-      state_code_numeric = clean_code(
-        state_code_source
-      ),
-
-      district_code_numeric = clean_code(
-        district_code_source
-      )
-    ) %>%
-
-    # Remove blank rows, notes and footer text
-    filter(
-      !is.na(state_code_numeric),
-      !is.na(district_code_numeric)
-    )
-
-
-  # ----------------------------------------------------------
-  # Check that codes are whole numbers
-  # ----------------------------------------------------------
-
-  invalid_state_integer <-
-    !is.na(lookup_clean$state_code_numeric) &
-    abs(
-      lookup_clean$state_code_numeric -
-        round(lookup_clean$state_code_numeric)
-    ) > 1e-8
-
-
-  invalid_district_integer <-
-    !is.na(lookup_clean$district_code_numeric) &
-    abs(
-      lookup_clean$district_code_numeric -
-        round(lookup_clean$district_code_numeric)
-    ) > 1e-8
-
-
-  if (any(invalid_state_integer)) {
-
-    stop(
-      paste(
-        lookup_name,
-        "contains non-integer state codes."
-      )
-    )
-  }
-
-
-  if (any(invalid_district_integer)) {
-
-    stop(
-      paste(
-        lookup_name,
-        "contains non-integer district codes."
-      )
-    )
-  }
-
-
-  lookup_clean <- lookup_clean %>%
-    transmute(
-      panel_code = panel_code,
-
-      state_code_std = sprintf(
-        "%02d",
-        as.integer(
-          round(state_code_numeric)
-        )
-      ),
-
-      district_code_std = sprintf(
-        "%03d",
-        as.integer(
-          round(district_code_numeric)
-        )
-      ),
-
-      State_Name_Panel = trimws(
-        gsub(
-          "\\s+",
-          " ",
-          as.character(State_Name_Panel)
-        )
-      ),
-
-      District_Name_Panel = trimws(
-        gsub(
-          "\\s+",
-          " ",
-          as.character(District_Name_Panel)
-        )
-      )
-    )
-
-
-  # ----------------------------------------------------------
-  # Check for missing names
-  # ----------------------------------------------------------
-
-  missing_names <- lookup_clean %>%
-    filter(
-      is.na(State_Name_Panel) |
-        State_Name_Panel == "" |
-        is.na(District_Name_Panel) |
-        District_Name_Panel == ""
-    )
-
-
-  if (nrow(missing_names) > 0L) {
-
-    print(
-      missing_names,
-      n = Inf
-    )
-
-    stop(
-      paste(
-        lookup_name,
-        "contains missing state or district names."
-      )
-    )
-  }
-
-
-  # ----------------------------------------------------------
-  # Each code must occur once within the lookup
-  # ----------------------------------------------------------
-
-  duplicate_keys <- lookup_clean %>%
-    count(
-      panel_code,
-      state_code_std,
-      district_code_std,
-      name = "lookup_rows"
-    ) %>%
-
-    filter(
-      lookup_rows > 1L
-    )
-
-
-  if (nrow(duplicate_keys) > 0L) {
-
-    print(
-      duplicate_keys,
-      n = Inf
-    )
-
-    stop(
-      paste(
-        lookup_name,
-        "contains duplicated state-district code keys."
-      )
-    )
-  }
-
-
-  lookup_clean
-}
-
-
-# ============================================================
-# 8.4 PREPARE AND COMBINE THE LOOKUPS
-# ============================================================
-
-district_lookup_p1 <- prepare_district_lookup(
-  lookup_data = panel1,
-  panel_code = "P1",
-  lookup_name = "Panel 1 lookup"
-)
-
-
-district_lookup_p2 <- prepare_district_lookup(
-  lookup_data = panel2,
-  panel_code = "P2",
-  lookup_name = "Panel 2 lookup"
-)
-
-
-district_lookup_p3 <- prepare_district_lookup(
-  lookup_data = panel3,
-  panel_code = "P3",
-  lookup_name = "Panel 3 lookup"
-)
-
-
-district_lookup_p4 <- prepare_district_lookup(
-  lookup_data = panel4,
-  panel_code = "P4",
-  lookup_name = "Panel 4 lookup"
-)
-
-
-district_lookup_2025 <- prepare_district_lookup(
-  lookup_data = panel2025,
-  panel_code = "2025",
-  lookup_name = "2025 lookup"
-)
-
-
-district_lookup_all <- bind_rows(
-  district_lookup_p1,
-  district_lookup_p2,
-  district_lookup_p3,
-  district_lookup_p4,
-  district_lookup_2025
-)
-
-
-# 2025 lookup without panel_code, used only as an exact-code
-# fallback for unmatched P4 observations
-district_lookup_2025_backfill <- district_lookup_2025 %>%
-  select(
-    state_code_std,
-    district_code_std,
-
-    State_Name_2025_Backfill =
-      State_Name_Panel,
-
-    District_Name_2025_Backfill =
-      District_Name_Panel
-  )
-
-
-duplicate_combined_keys <- district_lookup_all %>%
-  count(
-    panel_code,
-    state_code_std,
-    district_code_std,
-    name = "lookup_rows"
-  ) %>%
-
-  filter(
-    lookup_rows > 1L
-  )
-
-
-if (nrow(duplicate_combined_keys) > 0L) {
-
-  print(
-    duplicate_combined_keys,
-    n = Inf
-  )
-
-  stop(
-    "The combined district lookup contains duplicated keys."
-  )
-}
-
-
-district_lookup_audit <- district_lookup_all %>%
-  group_by(
-    panel_code
-  ) %>%
-
-  summarise(
-    states = n_distinct(
-      state_code_std
-    ),
-
-    district_codes = n(),
-
-    .groups = "drop"
-  )
-
-
-print(
-  district_lookup_audit,
-  n = Inf
-)
-
-
-# ============================================================
-# 8.5 CLEAN THE PANEL VARIABLE IN CALENDAR-YEAR 2023
-# ============================================================
-
-clean_person_panel_code <- function(
-    x,
-    dataset_name = "dataset"
-) {
-
-  if (
-    inherits(x, "haven_labelled") ||
-      inherits(x, "labelled")
-  ) {
-
-    labelled_value <- tryCatch(
-      as.character(
-        haven::as_factor(x)
-      ),
-
-      error = function(e) {
-        rep(
-          NA_character_,
-          length(x)
-        )
-      }
-    )
-
-    raw_value <- as.character(
-      haven::zap_labels(x)
-    )
-
-  } else {
-
-    labelled_value <- as.character(x)
-    raw_value <- as.character(x)
-  }
-
-
-  labelled_value <- toupper(
-    trimws(labelled_value)
-  )
-
-  raw_value <- toupper(
-    trimws(raw_value)
-  )
-
-
-  panel_text <- ifelse(
-    !is.na(labelled_value) &
-      labelled_value != "",
-
-    labelled_value,
-
-    raw_value
-  )
-
-
-  panel_clean <- case_when(
-
-    panel_text %in% c(
-      "3",
-      "P3",
-      "PANEL 3",
-      "PANEL3"
-    ) ~
-      "P3",
-
-    panel_text %in% c(
-      "4",
-      "P4",
-      "PANEL 4",
-      "PANEL4"
-    ) ~
-      "P4",
-
-    grepl(
-      "PANEL[[:space:]]*3",
-      panel_text
-    ) ~
-      "P3",
-
-    grepl(
-      "PANEL[[:space:]]*4",
-      panel_text
-    ) ~
-      "P4",
-
-    TRUE ~
-      NA_character_
-  )
-
-
-  invalid_values <-
-    !is.na(panel_text) &
-    panel_text != "" &
-    is.na(panel_clean)
-
-
-  if (any(invalid_values)) {
-
-    cat(
-      "\nUnrecognised panel values in ",
-      dataset_name,
-      ":\n",
-      sep = ""
-    )
-
-    print(
-      unique(
-        panel_text[
-          invalid_values
-        ]
-      )
-    )
-
-    stop(
-      paste(
-        dataset_name,
-        "contains unrecognised panel values."
-      )
-    )
-  }
-
-
-  panel_clean
-}
-
-
-# ============================================================
-# 8.6 ATTACH DISTRICT INFORMATION TO ONE DATASET
-# ============================================================
-
-add_official_district_names <- function(
-    data,
-    state_column,
-    district_column,
-    lookup_data,
-    lookup_2025_backfill,
-    dataset_name = "dataset",
-    fixed_panel = NULL,
-    panel_column = NULL
-) {
-
-  required_columns <- c(
-    state_column,
-    district_column
-  )
-
-
-  if (!is.null(panel_column)) {
-
-    required_columns <- c(
-      required_columns,
-      panel_column
-    )
-  }
-
-
-  missing_columns <- setdiff(
-    required_columns,
-    names(data)
-  )
-
-
-  if (length(missing_columns) > 0L) {
-
+standardise_codes <- function(df,
+                              state_var,
+                              district_var,
+                              period) {
+  
+  # Check state variable exists
+  if (!(state_var %in% names(df))) {
     stop(
       paste0(
-        dataset_name,
-        " is missing: ",
-        paste(
-          missing_columns,
-          collapse = ", "
-        )
+        "State variable '",
+        state_var,
+        "' does not exist in ",
+        period
       )
     )
   }
-
-
-  if (
-    is.null(fixed_panel) &&
-      is.null(panel_column)
-  ) {
-
+  
+  # Check district variable exists
+  if (!(district_var %in% names(df))) {
     stop(
-      paste(
-        dataset_name,
-        "requires either fixed_panel or panel_column."
+      paste0(
+        "District variable '",
+        district_var,
+        "' does not exist in ",
+        period
       )
     )
   }
-
-
-  if (
-    !is.null(fixed_panel) &&
-      !is.null(panel_column)
-  ) {
-
-    stop(
-      paste(
-        dataset_name,
-        "cannot use fixed_panel and panel_column simultaneously."
-      )
-    )
-  }
-
-
-  rows_before <- nrow(data)
-
-
-  # ----------------------------------------------------------
-  # Remove all geographic variables from previous runs
-  # ----------------------------------------------------------
-
-  geographic_variable_pattern <- paste0(
-    "^(",
-    paste(
-      c(
-        "panel_code",
-        "state_code_std",
-        "district_code_std",
-        "district_id_raw",
-        "District_ID_Panel",
-        "State_Name",
-        "District_Name",
-        "State_Name_Panel",
-        "District_Name_Panel",
-        "State_Name_2025_Backfill",
-        "District_Name_2025_Backfill",
-        "State_Name_2025_Candidate",
-        "District_Name_2025_Candidate",
-        "State_Name_Working",
-        "District_Name_Working",
-        "State_Name_Key",
-        "District_Name_Key",
-        "District_ID",
-        "District_Name_Source",
-        "district_lookup_status",
-        "district_lookup_matched",
-        "district_panel_lookup_matched",
-        "district_name_available"
-      ),
-      collapse = "|"
+  
+  
+  # Extract original variables
+  state_vector <- safe_integer(df[[state_var]])
+  district_vector <- safe_integer(df[[district_var]])
+  
+  
+  # Remove harmonisation variables if script is re-run
+  variables_to_remove <- setdiff(
+    c(
+      "state_code",
+      "district_code",
+      "raw_district_key",
+      "canonical_key",
+      "district_uid",
+      "survey_period"
     ),
-    ")(\\.x|\\.y)?$"
+    c(state_var, district_var)
   )
-
-
-  data <- data %>%
-    select(
-      -matches(
-        geographic_variable_pattern
-      )
-    )
-
-
-  # ----------------------------------------------------------
-  # Clean the person-file codes
-  # ----------------------------------------------------------
-
-  state_code <- clean_code(
-    data[[state_column]]
-  )
-
-  district_code <- clean_code(
-    data[[district_column]]
-  )
-
-
-  invalid_state_integer <-
-    !is.na(state_code) &
-    abs(
-      state_code -
-        round(state_code)
-    ) > 1e-8
-
-
-  invalid_district_integer <-
-    !is.na(district_code) &
-    abs(
-      district_code -
-        round(district_code)
-    ) > 1e-8
-
-
-  if (any(invalid_state_integer)) {
-
-    stop(
-      paste(
-        dataset_name,
-        "contains non-integer state codes."
-      )
-    )
-  }
-
-
-  if (any(invalid_district_integer)) {
-
-    stop(
-      paste(
-        dataset_name,
-        "contains non-integer district codes."
-      )
-    )
-  }
-
-
-  state_code <- as.integer(
-    round(state_code)
-  )
-
-  district_code <- as.integer(
-    round(district_code)
-  )
-
-
-  # ----------------------------------------------------------
-  # Determine each person's PLFS panel
-  # ----------------------------------------------------------
-
-  if (!is.null(fixed_panel)) {
-
-    person_panel <- rep(
-      fixed_panel,
-      nrow(data)
-    )
-
-  } else {
-
-    person_panel <- clean_person_panel_code(
-      data[[panel_column]],
-      dataset_name = dataset_name
-    )
-  }
-
-
-  # ----------------------------------------------------------
-  # Construct panel-specific identifiers
-  # ----------------------------------------------------------
-
-  data <- data %>%
+  
+  
+  df <- df %>%
+    select(-any_of(variables_to_remove))
+  
+  
+  # Create consistent variables for every PLFS wave
+  df %>%
     mutate(
-      .row_order_geography = row_number(),
-
-      panel_code = person_panel,
-
-      state_code_std = if_else(
-        is.na(state_code),
-        NA_character_,
-        sprintf(
-          "%02d",
-          state_code
-        )
-      ),
-
-      district_code_std = if_else(
-        is.na(district_code),
-        NA_character_,
-        sprintf(
-          "%03d",
+      state_code = state_vector,
+      district_code = district_vector,
+      
+      raw_district_key =
+        make_raw_key(
+          state_code,
           district_code
-        )
-      ),
-
-      district_id_raw = if_else(
-        is.na(state_code_std) |
-          is.na(district_code_std),
-
-        NA_character_,
-
-        paste0(
-          state_code_std,
-          "_",
-          district_code_std
-        )
-      ),
-
-      District_ID_Panel = if_else(
-        is.na(panel_code) |
-          is.na(state_code_std) |
-          is.na(district_code_std),
-
-        NA_character_,
-
-        paste(
-          panel_code,
-          state_code_std,
-          district_code_std,
-          sep = "_"
-        )
-      )
-    )
-
-
-  missing_geography <- data %>%
-    filter(
-      is.na(panel_code) |
-        is.na(state_code_std) |
-        is.na(district_code_std)
-    )
-
-
-  if (nrow(missing_geography) > 0L) {
-
-    print(
-      missing_geography %>%
-        count(
-          panel_code,
-          state_code_std,
-          district_code_std,
-          name = "person_observations"
         ),
-      n = Inf
+      
+      survey_period = period
     )
-
-    stop(
-      paste(
-        dataset_name,
-        "contains missing panel, state or district codes."
-      )
-    )
-  }
-
-
-  # ----------------------------------------------------------
-  # First join: correct panel-specific lookup
-  # ----------------------------------------------------------
-
-  data <- data %>%
-    left_join(
-      lookup_data,
-      by = c(
-        "panel_code",
-        "state_code_std",
-        "district_code_std"
-      )
-    )
-
-
-  if (nrow(data) != rows_before) {
-
-    stop(
-      paste(
-        dataset_name,
-        "row count changed during the panel lookup join."
-      )
-    )
-  }
-
-
-  # ----------------------------------------------------------
-  # Second join: exact-code 2025 fallback
-  #
-  # This fallback is only used when:
-  #
-  #   panel_code == P4
-  #   no Panel 4 name was found
-  #   the exact same state/district code exists in 2025
-  # ----------------------------------------------------------
-
-  data <- data %>%
-    left_join(
-      lookup_2025_backfill,
-      by = c(
-        "state_code_std",
-        "district_code_std"
-      )
-    )
-
-
-  if (nrow(data) != rows_before) {
-
-    stop(
-      paste(
-        dataset_name,
-        "row count changed during the 2025 backfill join."
-      )
-    )
-  }
-
-
-  # ----------------------------------------------------------
-  # Classify the source and reliability of the district name
-  # ----------------------------------------------------------
-
-  data <- data %>%
-    mutate(
-      district_lookup_status = case_when(
-
-        !is.na(State_Name_Panel) &
-          !is.na(District_Name_Panel) ~
-          "matched_panel_lookup",
-
-        panel_code == "P4" &
-          is.na(District_Name_Panel) &
-          !is.na(State_Name_2025_Backfill) &
-          !is.na(District_Name_2025_Backfill) ~
-          "backfilled_from_2025_exact_code",
-
-        TRUE ~
-          "unresolved"
-      ),
-
-
-      State_Name = case_when(
-
-        district_lookup_status ==
-          "matched_panel_lookup" ~
-          State_Name_Panel,
-
-        district_lookup_status ==
-          "backfilled_from_2025_exact_code" ~
-          State_Name_2025_Backfill,
-
-        TRUE ~
-          NA_character_
-      ),
-
-
-      District_Name = case_when(
-
-        district_lookup_status ==
-          "matched_panel_lookup" ~
-          District_Name_Panel,
-
-        district_lookup_status ==
-          "backfilled_from_2025_exact_code" ~
-          District_Name_2025_Backfill,
-
-        TRUE ~
-          NA_character_
-      ),
-
-
-      District_Name_Source = case_when(
-
-        district_lookup_status ==
-          "matched_panel_lookup" ~
-          paste0(
-            panel_code,
-            " panel lookup"
-          ),
-
-        district_lookup_status ==
-          "backfilled_from_2025_exact_code" ~
-          "2025 exact-code backfill",
-
-        TRUE ~
-          "unresolved"
-      ),
-
-
-      # Direct panel match only
-      district_panel_lookup_matched =
-        as.integer(
-          district_lookup_status ==
-            "matched_panel_lookup"
-        ),
-
-
-      # A usable name is available either directly or by backfill
-      district_lookup_matched =
-        as.integer(
-          district_lookup_status !=
-            "unresolved"
-        ),
-
-
-      district_name_available =
-        as.integer(
-          !is.na(State_Name) &
-            !is.na(District_Name)
-        )
-    )
-
-
-  # ----------------------------------------------------------
-  # Unmatched codes outside P4 indicate a genuine error
-  # ----------------------------------------------------------
-
-  unexpected_unresolved <- data %>%
-    filter(
-      district_lookup_status == "unresolved",
-      panel_code != "P4"
-    ) %>%
-
-    count(
-      panel_code,
-      state_code_std,
-      district_code_std,
-      District_ID_Panel,
-      name = "person_observations"
-    )
-
-
-  if (nrow(unexpected_unresolved) > 0L) {
-
-    print(
-      unexpected_unresolved,
-      n = Inf
-    )
-
-    stop(
-      paste(
-        dataset_name,
-        "contains unresolved district codes outside Panel 4."
-      )
-    )
-  }
-
-
-  # ----------------------------------------------------------
-  # P4 unresolved codes are retained and reported
-  # ----------------------------------------------------------
-
-  unresolved_p4 <- data %>%
-    filter(
-      district_lookup_status == "unresolved",
-      panel_code == "P4"
-    ) %>%
-
-    count(
-      panel_code,
-      state_code_std,
-      district_code_std,
-      District_ID_Panel,
-      name = "person_observations"
-    ) %>%
-
-    arrange(
-      state_code_std,
-      district_code_std
-    )
-
-
-  if (nrow(unresolved_p4) > 0L) {
-
-    cat(
-      "\nUnresolved Panel 4 district codes in ",
-      dataset_name,
-      ":\n",
-      sep = ""
-    )
-
-    print(
-      unresolved_p4,
-      n = Inf
-    )
-
-    warning(
-      paste(
-        dataset_name,
-        "contains unresolved Panel 4 district codes.",
-        "They were retained with missing district names."
-      )
-    )
-  }
-
-
-  data <- data %>%
-    arrange(
-      .row_order_geography
-    ) %>%
-
-    select(
-      -.row_order_geography
-    )
-
-
-  if (nrow(data) != rows_before) {
-
-    stop(
-      paste(
-        dataset_name,
-        "row count changed while attaching district information."
-      )
-    )
-  }
-
-
-  data
 }
 
 
-# ============================================================
-# 8.7 MAP EACH ANALYSIS DATASET TO ITS PANEL
-# ============================================================
+# ================================================================
+# 3. LOAD DATASETS INTO A LIST
+# ================================================================
 
-district_registry <- list(
-  `2017-18` = list(
-    object_name = "analysis17_18",
-    state_column = "state_per_fv",
-    district_column = "b1q4_per_fv",
-    fixed_panel = "P1",
-    panel_column = NULL
+datasets <- setNames(
+  
+  lapply(
+    code_vars$dataset,
+    function(x) get(x, envir = .GlobalEnv)
   ),
-
-  `2018-19` = list(
-    object_name = "analysis18_19",
-    state_column = "state_per_fv",
-    district_column = "b1q4_per_fv",
-    fixed_panel = "P1",
-    panel_column = NULL
-  ),
-
-  `2019-20` = list(
-    object_name = "analysis19_20",
-    state_column = "state_per_fv",
-    district_column = "b1q4_per_fv",
-    fixed_panel = "P2",
-    panel_column = NULL
-  ),
-
-  `2020-21` = list(
-    object_name = "analysis20_21",
-    state_column = "state_perv1",
-    district_column = "distcode_perv1",
-    fixed_panel = "P2",
-    panel_column = NULL
-  ),
-
-  `2022` = list(
-    object_name = "analysis22",
-    state_column = "state_cperv1",
-    district_column = "distcode_cperv1",
-    fixed_panel = "P3",
-    panel_column = NULL
-  ),
-
-  # Calendar-year 2023 contains both P3 and P4 observations
-  `2023` = list(
-    object_name = "analysis23",
-    state_column = "state_cperv1",
-    district_column = "distcode_cperv1",
-    fixed_panel = NULL,
-    panel_column = "panel_cperv1"
-  ),
-
-  `2024` = list(
-    object_name = "analysis24",
-    state_column = "State_UT_Code",
-    district_column = "District_Code",
-    fixed_panel = "P4",
-    panel_column = NULL
-  ),
-
-  `2025` = list(
-    object_name = "analysis25",
-    state_column = "st",
-    district_column = "dc",
-    fixed_panel = "2025",
-    panel_column = NULL
-  )
+  
+  code_vars$dataset
 )
 
 
-if (exists(
-  "analysis21_22",
-  envir = .GlobalEnv
-)) {
+# ================================================================
+# 4. STANDARDISE STATE/DISTRICT VARIABLES
+# ================================================================
 
-  district_registry <- append(
-    district_registry,
-
-    list(
-      `2021-22` = list(
-        object_name = "analysis21_22",
-        state_column = "state_perv1",
-        district_column = "distcode_perv1",
-        fixed_panel = "P3",
-        panel_column = NULL
-      )
-    ),
-
-    after = 4L
-  )
+for (i in seq_len(nrow(code_vars))) {
+  
+  dataset_name <- code_vars$dataset[i]
+  
+  datasets[[dataset_name]] <-
+    standardise_codes(
+      
+      df = datasets[[dataset_name]],
+      
+      state_var =
+        code_vars$state_var[i],
+      
+      district_var =
+        code_vars$district_var[i],
+      
+      period =
+        code_vars$period[i]
+    )
 }
 
 
-# ============================================================
-# 8.8 CHECK DATASETS AND SOURCE VARIABLES
-# ============================================================
-
-district_mapping_audit <- imap_dfr(
-  district_registry,
-  function(item, dataset_name) {
-
-    object_exists <- exists(
-      item$object_name,
-      envir = .GlobalEnv
-    )
-
-
-    if (object_exists) {
-
-      current_data <- get(
-        item$object_name,
-        envir = .GlobalEnv
-      )
-
-      state_column_exists <-
-        item$state_column %in%
-        names(current_data)
-
-      district_column_exists <-
-        item$district_column %in%
-        names(current_data)
-
-      panel_column_exists <-
-        is.null(item$panel_column) ||
-        item$panel_column %in%
-          names(current_data)
-
-    } else {
-
-      state_column_exists <- FALSE
-      district_column_exists <- FALSE
-      panel_column_exists <- FALSE
-    }
-
-
-    tibble(
-      dataset = dataset_name,
-      object_name = item$object_name,
-      object_exists = object_exists,
-      state_column = item$state_column,
-      state_column_exists = state_column_exists,
-      district_column = item$district_column,
-      district_column_exists = district_column_exists,
-
-      fixed_panel = ifelse(
-        is.null(item$fixed_panel),
-        NA_character_,
-        item$fixed_panel
-      ),
-
-      panel_column = ifelse(
-        is.null(item$panel_column),
-        NA_character_,
-        item$panel_column
-      ),
-
-      panel_column_exists = panel_column_exists
-    )
-  }
-)
-
-
-print(
-  district_mapping_audit,
-  n = Inf
-)
-
-
-invalid_mappings <- district_mapping_audit %>%
-  filter(
-    !object_exists |
-      !state_column_exists |
-      !district_column_exists |
-      !panel_column_exists
-  )
-
-
-if (nrow(invalid_mappings) > 0L) {
-
-  print(
-    invalid_mappings,
-    n = Inf
-  )
-
-  stop(
-    "At least one dataset or geographic source variable is missing."
-  )
-}
-
-
-# ============================================================
-# 8.9 APPLY THE LOOKUPS ONE DATASET AT A TIME
+# ================================================================
+# 5. CREATE 2017-19 BASELINE DISTRICT SYSTEM
+# ================================================================
 #
-# gc() is run between years to reduce memory pressure.
-# ============================================================
+# 2017-18 + 2018-19 constitute the baseline.
+#
+# Every unique state-district pair appearing during this period
+# receives its own district_uid.
+# ================================================================
 
-for (dataset_name in names(district_registry)) {
-
-  item <- district_registry[[dataset_name]]
-
-
-  message(
-    "Processing district information for ",
-    dataset_name,
-    "..."
-  )
-
-
-  current_data <- get(
-    item$object_name,
-    envir = .GlobalEnv
-  )
-
-
-  updated_data <- add_official_district_names(
-    data = current_data,
-    state_column = item$state_column,
-    district_column = item$district_column,
-    lookup_data = district_lookup_all,
-    lookup_2025_backfill =
-      district_lookup_2025_backfill,
-    dataset_name = dataset_name,
-    fixed_panel = item$fixed_panel,
-    panel_column = item$panel_column
-  )
-
-
-  assign(
-    item$object_name,
-    updated_data,
-    envir = .GlobalEnv
-  )
-
-
-  rm(
-    current_data,
-    updated_data
-  )
-
-  gc()
-
-
-  message(
-    "Finished ",
-    dataset_name
-  )
-}
-
-
-# ============================================================
-# 8.10 AUDIT THE RESULTS
-# ============================================================
-
-district_id_audit <- imap_dfr(
-  district_registry,
-  function(item, dataset_name) {
-
-    current_data <- get(
-      item$object_name,
-      envir = .GlobalEnv
+baseline_lookup <- bind_rows(
+  
+  datasets$analysis17_18 %>%
+    distinct(
+      state_code,
+      district_code,
+      raw_district_key
+    ),
+  
+  datasets$analysis18_19 %>%
+    distinct(
+      state_code,
+      district_code,
+      raw_district_key
     )
-
-
-    current_data %>%
-      group_by(
-        panel_code
-      ) %>%
-
-      summarise(
-        dataset = dataset_name,
-
-        observations = n(),
-
-        unique_states = n_distinct(
-          state_code_std
-        ),
-
-        unique_panel_districts = n_distinct(
-          District_ID_Panel
-        ),
-
-        matched_panel_observations = sum(
-          district_lookup_status ==
-            "matched_panel_lookup"
-        ),
-
-        backfilled_observations = sum(
-          district_lookup_status ==
-            "backfilled_from_2025_exact_code"
-        ),
-
-        unresolved_observations = sum(
-          district_lookup_status ==
-            "unresolved"
-        ),
-
-        .groups = "drop"
-      ) %>%
-
-      select(
-        dataset,
-        everything()
-      )
-  }
-)
-
-
-print(
-  district_id_audit,
-  n = Inf
-)
-
-
-# ============================================================
-# 8.11 CREATE A UNIQUE DISTRICT INVENTORY
-# ============================================================
-
-district_inventory_by_year <- imap_dfr(
-  district_registry,
-  function(item, dataset_name) {
-
-    current_data <- get(
-      item$object_name,
-      envir = .GlobalEnv
-    )
-
-
-    current_data %>%
-      count(
-        panel_code,
-        state_code_std,
-        district_code_std,
-        District_ID_Panel,
-        State_Name,
-        District_Name,
-        District_Name_Source,
-        district_lookup_status,
-        name = "person_observations"
-      ) %>%
-
-      mutate(
-        dataset = dataset_name,
-        .before = 1
-      )
-  }
+  
 ) %>%
-
-  arrange(
-    factor(
-      dataset,
-      levels = names(
-        district_registry
-      )
-    ),
-    panel_code,
-    state_code_std,
-    district_code_std
-  )
-
-
-# Separate table containing only unresolved districts
-unresolved_district_inventory <- district_inventory_by_year %>%
+  
   filter(
-    district_lookup_status ==
-      "unresolved"
-  )
-
-
-print(
-  unresolved_district_inventory,
-  n = Inf
-)
-
-
-# ============================================================
-# 8.12 FINAL CHECKS
-# ============================================================
-
-missing_panel_ids <- imap_int(
-  district_registry,
-  function(item, dataset_name) {
-
-    current_data <- get(
-      item$object_name,
-      envir = .GlobalEnv
-    )
-
-    sum(
-      is.na(
-        current_data$District_ID_Panel
-      )
-    )
-  }
-)
-
-
-if (any(missing_panel_ids > 0L)) {
-
-  stop(
-    "At least one observation has a missing panel-specific district ID."
-  )
-}
-
-
-total_unresolved <- sum(
-  district_id_audit$unresolved_observations
-)
-
-
-if (total_unresolved > 0L) {
-
-  warning(
-    paste(
-      total_unresolved,
-      "person observations have unresolved district names.",
-      "Their District_ID_Panel values were retained."
-    )
-  )
-}
-
-
-message(
-  paste(
-    "Panel-specific district information attached.",
-    "Unmatched P4 codes were backfilled from the exact 2025",
-    "state-district code where possible."
-  )
-)
-```
-
-Qurter and month insertion:
-```{r}
-# ============================================================
-# Validate a scalar calendar year
-# ============================================================
-
-validate_calendar_year <- function(x, argument_name = "calendar_year") {
-
-  if (length(x) != 1L) {
-    stop(
-      argument_name,
-      " must contain exactly one value."
-    )
-  }
-
-  year <- suppressWarnings(
-    as.integer(x)
-  )
-
-  if (
-    is.na(year) ||
-    year < 1900L ||
-    year > 2100L
-  ) {
-    stop(
-      argument_name,
-      " must be a valid four-digit year."
-    )
-  }
-
-  year
-}
-
-
-# ============================================================
-# Strictly extract PLFS quarter codes Q1-Q8
-# ============================================================
-
-get_plfs_quarter_number <- function(
-    x,
-    strict = TRUE
-) {
-
-  is_labelled <- (
-    inherits(x, "haven_labelled") ||
-    inherits(x, "labelled")
-  )
-
-  # Use labels where available, but retain unlabelled values
-  if (is_labelled) {
-
-    text_value <- as.character(
-      haven::as_factor(
-        x,
-        levels = "default"
-      )
-    )
-
-    raw_value <- haven::zap_labels(x)
-
-  } else {
-
-    text_value <- as.character(x)
-    raw_value <- x
-  }
-
-
-  text_value <- toupper(
-    trimws(text_value)
-  )
-
-
-  quarter_number <- rep(
-    NA_integer_,
-    length(text_value)
-  )
-
-
-  # Accept exact values such as Q1, Q2, ..., Q8
-  q_format <- grepl(
-    "^Q\\s*[1-8]$",
-    text_value
-  )
-
-  quarter_number[q_format] <- as.integer(
-    sub(
-      "^Q\\s*",
-      "",
-      text_value[q_format]
-    )
-  )
-
-
-  # Also accept exact numeric strings 1, 2, ..., 8
-  numeric_format <- grepl(
-    "^[1-8]$",
-    text_value
-  )
-
-  quarter_number[numeric_format] <- as.integer(
-    text_value[numeric_format]
-  )
-
-
-  # For labelled numeric vectors, use the underlying value
-  # when the displayed label could not be parsed
-  raw_number <- suppressWarnings(
-    as.integer(
-      as.character(raw_value)
-    )
-  )
-
-  use_raw_number <- (
-    is.na(quarter_number) &
-    raw_number %in% 1:8
-  )
-
-  quarter_number[use_raw_number] <- raw_number[use_raw_number]
-
-
-  # Detect nonmissing values that could not be parsed
-  invalid_value <- (
-    !is.na(text_value) &
-    nzchar(text_value) &
-    is.na(quarter_number)
-  )
-
-
-  if (any(invalid_value)) {
-
-    examples <- paste(
-      utils::head(
-        unique(text_value[invalid_value]),
-        5L
-      ),
-      collapse = ", "
-    )
-
-    message <- paste0(
-      "Unrecognised PLFS quarter values: ",
-      examples
-    )
-
-    if (strict) {
-      stop(message)
-    } else {
-      warning(
-        message,
-        call. = FALSE
-      )
-    }
-  }
-
-
-  quarter_number
-}
-
-
-# ============================================================
-# Extract month numbers 1-12
-#
-# Accepts:
-# 1, 01, M1, M01, January, Jan, etc.
-# ============================================================
-
-get_plfs_month_number <- function(
-    x,
-    strict = TRUE
-) {
-
-  is_labelled <- (
-    inherits(x, "haven_labelled") ||
-    inherits(x, "labelled")
-  )
-
-  if (is_labelled) {
-
-    text_value <- as.character(
-      haven::as_factor(
-        x,
-        levels = "default"
-      )
-    )
-
-    raw_value <- haven::zap_labels(x)
-
-  } else {
-
-    text_value <- as.character(x)
-    raw_value <- x
-  }
-
-
-  text_value <- toupper(
-    trimws(text_value)
-  )
-
-
-  month_number <- rep(
-    NA_integer_,
-    length(text_value)
-  )
-
-
-  # Numeric month: 1, 01, ..., 12
-  numeric_format <- grepl(
-    "^(0?[1-9]|1[0-2])$",
-    text_value
-  )
-
-  month_number[numeric_format] <- as.integer(
-    text_value[numeric_format]
-  )
-
-
-  # M1, M01, ..., M12
-  m_format <- grepl(
-    "^M\\s*(0?[1-9]|1[0-2])$",
-    text_value
-  )
-
-  month_number[m_format] <- as.integer(
-    sub(
-      "^M\\s*",
-      "",
-      text_value[m_format]
-    )
-  )
-
-
-  # Full and abbreviated English month names
-  month_lookup <- c(
-    setNames(1:12, toupper(month.name)),
-    setNames(1:12, toupper(month.abb))
-  )
-
-  named_month <- match(
-    text_value,
-    names(month_lookup)
-  )
-
-  use_named_month <- (
-    is.na(month_number) &
-    !is.na(named_month)
-  )
-
-  month_number[use_named_month] <- unname(
-    month_lookup[named_month[use_named_month]]
-  )
-
-
-  # Underlying numeric fallback
-  raw_number <- suppressWarnings(
-    as.integer(
-      as.character(raw_value)
-    )
-  )
-
-  use_raw_number <- (
-    is.na(month_number) &
-    raw_number %in% 1:12
-  )
-
-  month_number[use_raw_number] <- raw_number[use_raw_number]
-
-
-  invalid_value <- (
-    !is.na(text_value) &
-    nzchar(text_value) &
-    is.na(month_number)
-  )
-
-
-  if (any(invalid_value)) {
-
-    examples <- paste(
-      utils::head(
-        unique(text_value[invalid_value]),
-        5L
-      ),
-      collapse = ", "
-    )
-
-    message <- paste0(
-      "Unrecognised PLFS month values: ",
-      examples
-    )
-
-    if (strict) {
-      stop(message)
-    } else {
-      warning(
-        message,
-        call. = FALSE
-      )
-    }
-  }
-
-
-  month_number
-}
-
-
-# ============================================================
-# Legacy Q1-Q8 to calendar quarter
-# ============================================================
-
-convert_legacy_quarter <- function(q_number) {
-
-  calendar_quarter <- rep(
-    NA_integer_,
-    length(q_number)
-  )
-
-  calendar_quarter[q_number %in% c(1L, 5L)] <- 3L
-  calendar_quarter[q_number %in% c(2L, 6L)] <- 4L
-  calendar_quarter[q_number %in% c(3L, 7L)] <- 1L
-  calendar_quarter[q_number %in% c(4L, 8L)] <- 2L
-
-  calendar_quarter
-}
-
-
-# ============================================================
-# Add common timestamp variables
-# ============================================================
-
-finalise_plfs_time <- function(
-    data,
-    calendar_year,
-    calendar_quarter,
-    survey_month = NULL,
-    plfs_quarter_code = NULL
-) {
-
-  number_of_rows <- nrow(data)
-
-
-  calendar_year <- rep_len(
-    as.integer(calendar_year),
-    number_of_rows
-  )
-
-  calendar_quarter <- rep_len(
-    as.integer(calendar_quarter),
-    number_of_rows
-  )
-
-
-  if (is.null(survey_month)) {
-
-    survey_month <- rep(
-      NA_integer_,
-      number_of_rows
-    )
-
-  } else {
-
-    survey_month <- rep_len(
-      as.integer(survey_month),
-      number_of_rows
-    )
-  }
-
-
-  if (is.null(plfs_quarter_code)) {
-
-    plfs_quarter_code <- rep(
-      NA_integer_,
-      number_of_rows
-    )
-
-  } else {
-
-    plfs_quarter_code <- rep_len(
-      as.integer(plfs_quarter_code),
-      number_of_rows
-    )
-  }
-
-
-  invalid_quarter <- (
-    !is.na(calendar_quarter) &
-    !(calendar_quarter %in% 1:4)
-  )
-
-  if (any(invalid_quarter)) {
-    stop(
-      "Calendar quarter must be between 1 and 4."
-    )
-  }
-
-
-  invalid_month <- (
-    !is.na(survey_month) &
-    !(survey_month %in% 1:12)
-  )
-
-  if (any(invalid_month)) {
-    stop(
-      "Survey month must be between 1 and 12."
-    )
-  }
-
-
-  # Check that month and quarter agree
-  quarter_from_month <- rep(
-    NA_integer_,
-    number_of_rows
-  )
-
-  has_month <- !is.na(survey_month)
-
-  quarter_from_month[has_month] <- (
-    (survey_month[has_month] - 1L) %/% 3L
-  ) + 1L
-
-
-  inconsistent_time <- (
-    !is.na(quarter_from_month) &
-    !is.na(calendar_quarter) &
-    quarter_from_month != calendar_quarter
-  )
-
-  if (any(inconsistent_time)) {
-    stop(
-      "Survey month and calendar quarter disagree."
-    )
-  }
-
-
-  data$calendar_year <- calendar_year
-  data$calendar_quarter <- calendar_quarter
-  data$survey_month <- survey_month
-  data$plfs_quarter_code <- plfs_quarter_code
-
-
-  # First month of the quarter.
-  # This is not necessarily the actual survey month.
-  data$quarter_start_month <- rep(
-    NA_integer_,
-    number_of_rows
-  )
-
-  valid_quarter <- (
-    !is.na(calendar_year) &
-    !is.na(calendar_quarter)
-  )
-
-  data$quarter_start_month[valid_quarter] <- (
-    calendar_quarter[valid_quarter] - 1L
-  ) * 3L + 1L
-
-
-  data$year_quarter <- rep(
-    NA_character_,
-    number_of_rows
-  )
-
-  data$year_quarter[valid_quarter] <- sprintf(
-    "%04d_Q%d",
-    calendar_year[valid_quarter],
-    calendar_quarter[valid_quarter]
-  )
-
-
-  # Continuous quarterly index
-  data$quarter_id <- rep(
-    NA_integer_,
-    number_of_rows
-  )
-
-  data$quarter_id[valid_quarter] <- as.integer(
-    calendar_year[valid_quarter] * 4L +
-      calendar_quarter[valid_quarter] -
-      1L
-  )
-
-
-  data$quarter_start_date <- rep(
-    as.Date(NA),
-    number_of_rows
-  )
-
-  data$quarter_start_date[valid_quarter] <- as.Date(
-    sprintf(
-      "%04d-%02d-01",
-      calendar_year[valid_quarter],
-      data$quarter_start_month[valid_quarter]
-    )
-  )
-
-
-  valid_month <- (
-    !is.na(calendar_year) &
-    !is.na(survey_month)
-  )
-
-
-  data$year_month <- rep(
-    NA_character_,
-    number_of_rows
-  )
-
-  data$year_month[valid_month] <- sprintf(
-    "%04d_%02d",
-    calendar_year[valid_month],
-    survey_month[valid_month]
-  )
-
-
-  data$month_id <- rep(
-    NA_integer_,
-    number_of_rows
-  )
-
-  data$month_id[valid_month] <- as.integer(
-    calendar_year[valid_month] * 12L +
-      survey_month[valid_month] -
-      1L
-  )
-
-
-  data$month_start_date <- rep(
-    as.Date(NA),
-    number_of_rows
-  )
-
-  data$month_start_date[valid_month] <- as.Date(
-    sprintf(
-      "%04d-%02d-01",
-      calendar_year[valid_month],
-      survey_month[valid_month]
-    )
-  )
-
-
-  data
-}
-
-
-# ============================================================
-# July-June annual PLFS files
-# ============================================================
-
-add_annual_quarter <- function(
-    data,
-    quarter_column,
-    start_year
-) {
-
-  if (!(quarter_column %in% names(data))) {
-    stop(
-      "Quarter column not found: ",
-      quarter_column
-    )
-  }
-
-  start_year <- validate_calendar_year(
-    start_year,
-    "start_year"
-  )
-
-
-  plfs_quarter_code <- get_plfs_quarter_number(
-    data[[quarter_column]]
-  )
-
-
-  calendar_quarter <- convert_legacy_quarter(
-    plfs_quarter_code
-  )
-
-
-  calendar_year <- rep(
-    NA_integer_,
-    length(plfs_quarter_code)
-  )
-
-
-  first_half <- plfs_quarter_code %in% c(
-    1L, 2L, 5L, 6L
-  )
-
-  second_half <- plfs_quarter_code %in% c(
-    3L, 4L, 7L, 8L
-  )
-
-
-  calendar_year[first_half] <- start_year
-  calendar_year[second_half] <- start_year + 1L
-
-
-  finalise_plfs_time(
-    data = data,
-    calendar_year = calendar_year,
-    calendar_quarter = calendar_quarter,
-    plfs_quarter_code = plfs_quarter_code
-  )
-}
-
-
-# ============================================================
-# Legacy calendar-year PLFS files
-# ============================================================
-
-add_calendar_year_quarter <- function(
-    data,
-    quarter_column,
-    calendar_year
-) {
-
-  if (!(quarter_column %in% names(data))) {
-    stop(
-      "Quarter column not found: ",
-      quarter_column
-    )
-  }
-
-  calendar_year <- validate_calendar_year(
-    calendar_year
-  )
-
-
-  plfs_quarter_code <- get_plfs_quarter_number(
-    data[[quarter_column]]
-  )
-
-
-  calendar_quarter <- convert_legacy_quarter(
-    plfs_quarter_code
-  )
-
-
-  finalise_plfs_time(
-    data = data,
-    calendar_year = calendar_year,
-    calendar_quarter = calendar_quarter,
-    plfs_quarter_code = plfs_quarter_code
-  )
-}
-
-
-# ============================================================
-# Monthly calendar-year data
-#
-# Month is the source of truth.
-# Quarter is derived from month.
-# ============================================================
-
-add_calendar_month <- function(
-    data,
-    month_column,
-    calendar_year,
-    quarter_column = NULL
-) {
-
-  if (!(month_column %in% names(data))) {
-    stop(
-      "Month column not found: ",
-      month_column
-    )
-  }
-
-  calendar_year <- validate_calendar_year(
-    calendar_year
-  )
-
-
-  survey_month <- get_plfs_month_number(
-    data[[month_column]]
-  )
-
-
-  calendar_quarter <- rep(
-    NA_integer_,
-    length(survey_month)
-  )
-
-  valid_month <- !is.na(survey_month)
-
-  calendar_quarter[valid_month] <- (
-    (survey_month[valid_month] - 1L) %/% 3L
-  ) + 1L
-
-
-  plfs_quarter_code <- rep(
-    NA_integer_,
-    length(survey_month)
-  )
-
-
-  # Optionally validate the supplied direct quarter code
-  if (!is.null(quarter_column)) {
-
-    if (!(quarter_column %in% names(data))) {
-      stop(
-        "Quarter column not found: ",
-        quarter_column
-      )
-    }
-
-    plfs_quarter_code <- get_plfs_quarter_number(
-      data[[quarter_column]]
-    )
-
-
-    invalid_direct_quarter <- (
-      !is.na(plfs_quarter_code) &
-      !(plfs_quarter_code %in% 1:4)
-    )
-
-    if (any(invalid_direct_quarter)) {
-      stop(
-        "Monthly-format quarter codes must be Q1-Q4."
-      )
-    }
-
-
-    mismatch <- (
-      !is.na(plfs_quarter_code) &
-      !is.na(calendar_quarter) &
-      plfs_quarter_code != calendar_quarter
-    )
-
-    if (any(mismatch)) {
-      stop(
-        "The supplied month and quarter columns disagree."
-      )
-    }
-  }
-
-
-  finalise_plfs_time(
-    data = data,
-    calendar_year = calendar_year,
-    calendar_quarter = calendar_quarter,
-    survey_month = survey_month,
-    plfs_quarter_code = plfs_quarter_code
-  )
-}
-
-
-# ============================================================
-# 2025 wrapper
-# ============================================================
-
-add_2025_time <- function(
-    data,
-    month_column = "month",
-    quarter_column = "qtr"
-) {
-
-  add_calendar_month(
-    data = data,
-    month_column = month_column,
-    calendar_year = 2025L,
-    quarter_column = quarter_column
-  )
-}
-
-
-```
-
-
-
-Functions for quarter and year identifiers, so they can be in chronological order.
-```{r}
-# ============================================================
-# Extract the quarter number from values such as Q1, Q2, etc.
-# ============================================================
-
-get_plfs_quarter_number <- function(x) {
-
-  # If the quarter variable is Stata-labelled,
-  # convert it to the displayed label first
-  if (
-    inherits(x, "haven_labelled") ||
-    inherits(x, "labelled")
-  ) {
-    x <- haven::as_factor(
-      x,
-      levels = "labels"
-    )
-  }
-
-  x <- trimws(as.character(x))
-
-  # Extract the numeric part:
-  # Q1 -> 1, Q7 -> 7
-  suppressWarnings(
-    as.integer(
-      gsub("[^0-9]", "", x)
-    )
-  )
-}
-
-
-# ============================================================
-# Legacy PLFS quarter conversion
-#
-# Q1/Q5 = July-September      = calendar quarter 3
-# Q2/Q6 = October-December   = calendar quarter 4
-# Q3/Q7 = January-March      = calendar quarter 1
-# Q4/Q8 = April-June         = calendar quarter 2
-# ============================================================
-
-convert_legacy_quarter <- function(q_number) {
-
-  quarter <- rep(
-    NA_integer_,
-    length(q_number)
-  )
-
-  quarter[q_number %in% c(1, 5)] <- 3L
-  quarter[q_number %in% c(2, 6)] <- 4L
-  quarter[q_number %in% c(3, 7)] <- 1L
-  quarter[q_number %in% c(4, 8)] <- 2L
-
-  quarter
-}
-
-add_annual_quarter <- function(
-    data,
-    quarter_column,
-    start_year
-) {
-
-  # Check that the quarter column exists
-  if (!(quarter_column %in% names(data))) {
-    stop(
-      paste(
-        "Quarter column not found:",
-        quarter_column
-      )
-    )
-  }
-
-
-  # Read the original PLFS quarter code
-  plfs_quarter_number <- get_plfs_quarter_number(
-    data[[quarter_column]]
-  )
-
-
-  # Convert Q1-Q8 into calendar quarters 1-4
-  data$quarter <- convert_legacy_quarter(
-    plfs_quarter_number
-  )
-
-
-  # July-December belong to the starting year.
-  # January-June belong to the following year.
-  data$year <- ifelse(
-    plfs_quarter_number %in% c(3, 4, 7, 8),
-    start_year + 1L,
-    start_year
-  )
-
-
-  # Convert year back to integer because ifelse can alter type
-  data$year <- as.integer(data$year)
-
-
-  # Create a readable period label
-  data$year_quarter <- ifelse(
-    is.na(data$year) | is.na(data$quarter),
-    NA_character_,
-    paste0(
-      data$year,
-      "_Q",
-      data$quarter
-    )
-  )
-
-
-  # Numeric quarterly index:
-  # useful for sorting observations chronologically
-  data$period_index <- ifelse(
-    is.na(data$year) | is.na(data$quarter),
-    NA_integer_,
-    data$year * 4L + data$quarter
-  )
-
-
-  # Retain the original PLFS quarter number for auditing
-  data$plfs_quarter_code <- plfs_quarter_number
-
-
-  data
-}
-
-add_calendar_year_quarter <- function(
-    data,
-    quarter_column,
-    calendar_year
-) {
-
-  if (!(quarter_column %in% names(data))) {
-    stop(
-      paste(
-        "Quarter column not found:",
-        quarter_column
-      )
-    )
-  }
-
-
-  plfs_quarter_number <- get_plfs_quarter_number(
-    data[[quarter_column]]
-  )
-
-
-  # The year is fixed because this is a calendar-year file
-  data$year <- as.integer(calendar_year)
-
-
-  # Convert the rolling Q1-Q8 code to calendar quarter 1-4
-  data$quarter <- convert_legacy_quarter(
-    plfs_quarter_number
-  )
-
-
-  data$year_quarter <- ifelse(
-    is.na(data$quarter),
-    NA_character_,
-    paste0(
-      data$year,
-      "_Q",
-      data$quarter
-    )
-  )
-
-
-  data$period_index <- ifelse(
-    is.na(data$quarter),
-    NA_integer_,
-    data$year * 4L + data$quarter
-  )
-
-
-  data$plfs_quarter_code <- plfs_quarter_number
-
-
-  data
-}
-
-add_2025_quarter <- function(
-    data,
-    quarter_column = "qtr"
-) {
-
-  if (!(quarter_column %in% names(data))) {
-    stop(
-      paste(
-        "Quarter column not found:",
-        quarter_column
-      )
-    )
-  }
-
-
-  quarter_number <- get_plfs_quarter_number(
-    data[[quarter_column]]
-  )
-
-
-  # In 2025, Q1-Q4 correspond directly to calendar quarters
-  valid_quarter <- quarter_number %in% 1:4
-
-  data$year <- 2025L
-
-  data$quarter <- ifelse(
-    valid_quarter,
-    quarter_number,
-    NA_integer_
-  )
-
-  data$quarter <- as.integer(
-    data$quarter
-  )
-
-
-  data$year_quarter <- ifelse(
-    is.na(data$quarter),
-    NA_character_,
-    paste0(
-      "2025_Q",
-      data$quarter
-    )
-  )
-
-
-  data$period_index <- ifelse(
-    is.na(data$quarter),
-    NA_integer_,
-    data$year * 4L + data$quarter
-  )
-
-
-  data$plfs_quarter_code <- quarter_number
-
-
-  data
-}
-```
-
-Applying quarter-year functions.
-```{r}
-
-# 2017-18: Q1-Q4, July 2017-June 2018
-analysis17_18 <- add_annual_quarter(
-  data = analysis17_18,
-  quarter_column = "quarter_per_fv",
-  start_year = 2017
-)
-
-
-# 2018-19: Q5-Q8, July 2018-June 2019
-analysis18_19 <- add_annual_quarter(
-  data = analysis18_19,
-  quarter_column = "quarter_per_fv",
-  start_year = 2018
-)
-
-
-# 2019-20: Q1-Q4, July 2019-June 2020
-analysis19_20 <- add_annual_quarter(
-  data = analysis19_20,
-  quarter_column = "quarter_per_fv",
-  start_year = 2019
-)
-
-
-# 2020-21: Q5-Q8, July 2020-June 2021
-analysis20_21 <- add_annual_quarter(
-  data = analysis20_21,
-  quarter_column = "qtr_perv1",
-  start_year = 2020
-)
-
-
-# Calendar year 2022
-analysis22 <- add_calendar_year_quarter(
-  data = analysis22,
-  quarter_column = "qtr_cperv1",
-  calendar_year = 2022
-)
-
-
-# Calendar year 2023
-analysis23 <- add_calendar_year_quarter(
-  data = analysis23,
-  quarter_column = "qtr_cperv1",
-  calendar_year = 2023
-)
-
-
-# Calendar year 2024
-analysis24 <- add_calendar_year_quarter(
-  data = analysis24,
-  quarter_column = "Quarter",
-  calendar_year = 2024
-)
-
-
-# Calendar year 2025
-analysis25 <- add_2025_quarter(
-  data = analysis25,
-  quarter_column = "qtr"
-)
-```
-
-
-Combining all the above into one CSV file so that I don't have to load the whole thing every single time:
-```{r}
-
-```
-
-
-
-Metro binary and urban binary
-```{r}
-# ============================================================
-# Nationwide district-quarter metro and urban indicators
-# ============================================================
-
-library(dplyr)
-library(tidyr)
-library(purrr)
-library(readxl)
-library(stringr)
-library(tibble)
-library(here)
-
-
-
-# ============================================================
-# 1. Add the PLFS urban/rural indicator
-#
-# PLFS sector code:
-# 1 = rural
-# 2 = urban
-# ============================================================
-
-add_urban_flag <- function(
-    data,
-    sector_column
-) {
-
-  if (!(sector_column %in% names(data))) {
-    stop(
-      paste(
-        "Sector column not found:",
-        sector_column
-      )
-    )
-  }
-
-  sector_code <- clean_code(
-    data[[sector_column]]
-  )
-
-  data$sector_code <- as.integer(
-    sector_code
-  )
-
-  data$urban <- case_when(
-    sector_code == 2 ~ 1L,
-    sector_code == 1 ~ 0L,
-    TRUE ~ NA_integer_
-  )
-
-  data$rural <- case_when(
-    sector_code == 1 ~ 1L,
-    sector_code == 2 ~ 0L,
-    TRUE ~ NA_integer_
-  )
-
-  data
-}
-
-
-analysis17_18 <- add_urban_flag(
-  analysis17_18,
-  sector_column = "b1q3_per_fv"
-)
-
-analysis18_19 <- add_urban_flag(
-  analysis18_19,
-  sector_column = "b1q3_per_fv"
-)
-
-analysis19_20 <- add_urban_flag(
-  analysis19_20,
-  sector_column = "b1q3_per_fv"
-)
-
-analysis20_21 <- add_urban_flag(
-  analysis20_21,
-  sector_column = "b1q3_perv1"
-)
-
-analysis22 <- add_urban_flag(
-  analysis22,
-  sector_column = "b1q3_cperv1"
-)
-
-analysis23 <- add_urban_flag(
-  analysis23,
-  sector_column = "b1q3_cperv1"
-)
-
-analysis24 <- add_urban_flag(
-  analysis24,
-  sector_column = "Sector"
-)
-
-analysis25 <- add_urban_flag(
-  analysis25,
-  sector_column = "sec"
-)
-
-
-# ============================================================
-# 2. Download the official MoSPI district-code workbooks
-#
-# This section needs an internet connection on the first run.
-# The files are then retained locally.
-# ============================================================
-
-district_crosswalk_folder <- here(
-  "Data",
-  "Crosswalks",
-  "PLFS_District_Codes"
-)
-
-dir.create(
-  district_crosswalk_folder,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-
-district_file_information <- tribble(
-  ~panel,   ~file_name,                  ~download_url,
-
-  "panel1", "plfs_district_panel1.xlsx",
-  "https://microdata.gov.in/NADA/index.php/catalog/204/download/2662",
-
-  "panel2", "plfs_district_panel2.xlsx",
-  "https://microdata.gov.in/NADA/index.php/catalog/217/download/2665",
-
-  "panel3", "plfs_district_panel3.xlsx",
-  "https://microdata.gov.in/NADA/index.php/catalog/210/download/2667",
-
-  "panel4", "plfs_district_panel4.xlsx",
-  "https://microdata.gov.in/NADA/index.php/catalog/213/download/2668",
-
-  "y2025",  "plfs_district_2025.xlsx",
-  "https://microdata.gov.in/NADA/index.php/catalog/284/download/5920"
-) %>%
-  mutate(
-    local_path = file.path(
-      district_crosswalk_folder,
-      file_name
-    )
-  )
-
-
-download_government_file <- function(
-    download_url,
-    local_path
-) {
-
-  needs_download <-
-    !file.exists(local_path) ||
-    is.na(file.info(local_path)$size) ||
-    file.info(local_path)$size < 5000
-
-  if (needs_download) {
-
-    message(
-      "Downloading official MoSPI file: ",
-      basename(local_path)
-    )
-
-    tryCatch(
-      {
-        download.file(
-          url = download_url,
-          destfile = local_path,
-          mode = "wb",
-          quiet = FALSE
-        )
-      },
-      error = function(e) {
-        stop(
-          paste0(
-            "Could not download:\n",
-            download_url,
-            "\n\nDownload it manually and save it as:\n",
-            local_path,
-            "\n\nOriginal error:\n",
-            e$message
-          )
-        )
-      }
-    )
-  }
-
-  local_path
-}
-
-
-district_file_information$local_path <- map2_chr(
-  district_file_information$download_url,
-  district_file_information$local_path,
-  download_government_file
-)
-
-
-# ============================================================
-# 3. Functions for reading the official district workbooks
-# ============================================================
-
-clean_workbook_names <- function(x) {
-
-  x <- as.character(x)
-
-  x[is.na(x)] <- ""
-
-  x <- tolower(
-    trimws(x)
-  )
-
-  x <- str_replace_all(
-    x,
-    "[^a-z0-9]+",
-    "_"
-  )
-
-  x <- str_replace_all(
-    x,
-    "^_+|_+$",
-    ""
-  )
-
-  blank_names <- which(x == "")
-
-  if (length(blank_names) > 0) {
-    x[blank_names] <- paste0(
-      "unnamed_",
-      seq_along(blank_names)
-    )
-  }
-
-  make.unique(
-    x,
-    sep = "_"
-  )
-}
-
-
-# ============================================================
-# Identify columns inside the MoSPI district-code workbooks
-# ============================================================
-
-find_workbook_column <- function(
-    column_names,
-    patterns,
-    description
-) {
-
-  for (pattern in patterns) {
-
-    matches <- grep(
-      pattern,
-      column_names,
-      value = TRUE,
-      ignore.case = TRUE
-    )
-
-    if (length(matches) > 0) {
-      return(matches[1])
-    }
-  }
-
-  stop(
-    paste0(
-      "Could not identify the ",
-      description,
-      " column.\nAvailable columns: ",
-      paste(column_names, collapse = ", ")
-    )
-  )
-}
-
-
-# ============================================================
-# Combine one or two workbook rows into possible headers
-# ============================================================
-
-make_header_candidate <- function(
-    raw_sheet,
-    start_row,
-    number_of_rows = 1
-) {
-
-  end_row <- min(
-    start_row + number_of_rows - 1,
-    nrow(raw_sheet)
-  )
-
-  header_rows <- raw_sheet[
-    start_row:end_row,
-    ,
-    drop = FALSE
-  ]
-
-  combined_headers <- vapply(
-    seq_len(ncol(header_rows)),
-    function(column_number) {
-
-      values <- as.character(
-        header_rows[[column_number]]
-      )
-
-      values <- values[
-        !is.na(values) &
-          trimws(values) != ""
-      ]
-
-      paste(
-        values,
-        collapse = " "
-      )
-    },
-    character(1)
-  )
-
-  combined_headers
-}
-
-
-# ============================================================
-# Score whether a row looks like the real table header
-# ============================================================
-
-score_header_candidate <- function(header_values) {
-
-  header_text <- tolower(
-    paste(
-      header_values,
-      collapse = " | "
-    )
-  )
-
-  has_state_code <- grepl(
-    "state.*code|state.?ut.*code|st.*code",
-    header_text
-  )
-
-  has_district_code <- grepl(
-    "district.*code|dist.*code",
-    header_text
-  )
-
-  has_district_name <- grepl(
-    "district.*name|name.*district|name of district",
-    header_text
-  )
-
-  score <-
-    5L * as.integer(has_state_code) +
-    5L * as.integer(has_district_code) +
-    2L * as.integer(has_district_name)
-
-  list(
-    score = score,
-    has_state_code = has_state_code,
-    has_district_code = has_district_code
-  )
-}
-
-
-# ============================================================
-# Find the actual header row
-# ============================================================
-
-find_district_header <- function(
-    raw_sheet,
-    maximum_rows = 40
-) {
-
-  rows_to_check <- seq_len(
-    min(
-      maximum_rows,
-      nrow(raw_sheet)
-    )
-  )
-
-  candidates <- list()
-  candidate_number <- 1L
-
-
-  for (header_depth in c(1L, 2L)) {
-
-    for (header_row in rows_to_check) {
-
-      if (
-        header_row + header_depth - 1L >
-          nrow(raw_sheet)
-      ) {
-        next
-      }
-
-      header_values <- make_header_candidate(
-        raw_sheet = raw_sheet,
-        start_row = header_row,
-        number_of_rows = header_depth
-      )
-
-      header_score <- score_header_candidate(
-        header_values
-      )
-
-      candidates[[candidate_number]] <- list(
-        header_row = header_row,
-        header_depth = header_depth,
-        header_values = header_values,
-        score = header_score$score,
-        valid =
-          header_score$has_state_code &&
-          header_score$has_district_code
-      )
-
-      candidate_number <- candidate_number + 1L
-    }
-  }
-
-
-  valid_candidates <- candidates[
-    vapply(
-      candidates,
-      function(x) x$valid,
-      logical(1)
-    )
-  ]
-
-
-  if (length(valid_candidates) == 0) {
-
-    preview <- raw_sheet[
-      seq_len(min(10, nrow(raw_sheet))),
-      ,
-      drop = FALSE
-    ]
-
-    print(preview)
-
-    stop(
-      paste(
-        "Could not find the actual district-table header.",
-        "The first ten workbook rows were printed above."
-      )
-    )
-  }
-
-
-  candidate_scores <- vapply(
-    valid_candidates,
-    function(x) x$score,
-    integer(1)
-  )
-
-  valid_candidates[[
-    which.max(candidate_scores)
-  ]]
-}
-
-
-extract_first_integer <- function(x) {
-
-  suppressWarnings(
-    as.integer(
-      str_extract(
-        as.character(x),
-        "[0-9]+"
-      )
-    )
-  )
-}
-
-
-# ============================================================
-# Read one sheet from a MoSPI district-code workbook
-# ============================================================
-
-read_district_sheet <- function(
-    file_path,
-    sheet_name,
-    panel_name
-) {
-
-  raw_sheet <- suppressMessages(
-    readxl::read_excel(
-      path = file_path,
-      sheet = sheet_name,
-      col_names = FALSE,
-      col_types = "text"
-    )
-  )
-
-  raw_sheet <- as.data.frame(
-    raw_sheet,
-    stringsAsFactors = FALSE
-  )
-
-
-  if (
-    nrow(raw_sheet) == 0 ||
-    ncol(raw_sheet) == 0
-  ) {
-    return(
-      tibble::tibble()
-    )
-  }
-
-
-  # Find the genuine table header rather than the title
-  header_information <- find_district_header(
-    raw_sheet
-  )
-
-  header_row <- header_information$header_row
-  header_depth <- header_information$header_depth
-
-  header_values <- header_information$header_values
-
-  first_data_row <-
-    header_row +
-    header_depth
-
-
-  if (first_data_row > nrow(raw_sheet)) {
-    return(
-      tibble::tibble()
-    )
-  }
-
-
-  body <- raw_sheet[
-    first_data_row:nrow(raw_sheet),
-    ,
-    drop = FALSE
-  ]
-
-
-  names(body) <- clean_workbook_names(
-    header_values
-  )
-
-
-  # Remove completely empty columns
-  nonempty_columns <- vapply(
-    body,
-    function(x) {
-      any(
-        !is.na(x) &
-          trimws(as.character(x)) != ""
-      )
-    },
-    logical(1)
-  )
-
-  body <- body[
-    ,
-    nonempty_columns,
-    drop = FALSE
-  ]
-
-
-  # Identify the three required columns
-  state_code_column <- find_workbook_column(
-    names(body),
-    patterns = c(
-      "state_ut.*code",
-      "state.*code",
-      "^st.*code",
-      "^state_ut$"
-    ),
-    description = "state code"
-  )
-
-
-  district_code_column <- find_workbook_column(
-    names(body),
-    patterns = c(
-      "district.*code",
-      "^dist.*code"
-    ),
-    description = "district code"
-  )
-
-
-  district_name_column <- find_workbook_column(
-    names(body),
-    patterns = c(
-      "district.*name",
-      "name.*district",
-      "name_of_district",
-      "^district_name$",
-      "^district$"
-    ),
-    description = "district name"
-  )
-
-
-  # Replace blank state entries with NA before filling downward
-  body[[state_code_column]] <- as.character(
-    body[[state_code_column]]
-  )
-
-  body[[state_code_column]][
-    trimws(body[[state_code_column]]) == ""
-  ] <- NA_character_
-
-
-  # Workbooks often display the state code only on the first
-  # district row for each state
-  body <- tidyr::fill(
-    body,
-    dplyr::all_of(state_code_column),
-    .direction = "down"
-  )
-
-
-  result <- tibble::tibble(
-    panel = panel_name,
-
-    state_code = extract_first_integer(
-      body[[state_code_column]]
-    ),
-
-    district_code = extract_first_integer(
-      body[[district_code_column]]
-    ),
-
-    district_name = stringr::str_squish(
-      as.character(
-        body[[district_name_column]]
-      )
-    )
+    !is.na(state_code),
+    !is.na(district_code)
   ) %>%
-    dplyr::filter(
-      !is.na(state_code),
-      !is.na(district_code),
-      !is.na(district_name),
-      district_name != "",
-      !stringr::str_detect(
-        tolower(district_name),
-        "^total"
-      )
-    )
-
-
-  result
-}
-
-
-read_district_workbook <- function(
-    file_path,
-    panel_name
-) {
-
-  sheet_names <- excel_sheets(
-    file_path
-  )
-
-  result <- map_dfr(
-    sheet_names,
-    ~ read_district_sheet(
-      file_path = file_path,
-      sheet_name = .x,
-      panel_name = panel_name
-    )
-  )
-
-  if (nrow(result) == 0) {
-    stop(
-      paste(
-        "No district codes could be read from:",
-        file_path
-      )
-    )
-  }
-
-  result
-}
-
-
-official_district_lookup <- map2_dfr(
-  district_file_information$local_path,
-  district_file_information$panel,
-  read_district_workbook
-) %>%
+  
   distinct(
-    panel,
     state_code,
     district_code,
-    .keep_all = TRUE
-  )
-
-
-# ============================================================
-# 4. Standardise district names
-# ============================================================
-
-normalise_district_name <- function(x) {
-
-  x <- iconv(
-    as.character(x),
-    from = "",
-    to = "ASCII//TRANSLIT"
-  )
-
-  x <- tolower(x)
-
-  x <- str_replace_all(
-    x,
-    "&",
-    " and "
-  )
-
-  x <- str_replace_all(
-    x,
-    "[^a-z0-9]+",
-    " "
-  )
-
-  x <- str_squish(x)
-
-
-  case_when(
-    x %in% c(
-      "gurgaon",
-      "gurugram"
-    ) ~ "gurugram",
-
-    x %in% c(
-      "gautam budh nagar",
-      "gautam buddh nagar",
-      "gautam buddha nagar"
-    ) ~ "gautam buddha nagar",
-
-    x %in% c(
-      "bangalore urban",
-      "bengaluru urban",
-      "bangalore"
-    ) ~ "bengaluru urban",
-
-    x %in% c(
-      "ranga reddy",
-      "rangareddy"
-    ) ~ "rangareddy",
-
-    x %in% c(
-      "medchal malkajgiri",
-      "medchal malkajgiri district"
-    ) ~ "medchal malkajgiri",
-
-    x %in% c(
-      "north twenty four parganas",
-      "north 24 parganas",
-      "24 parganas north",
-      "north 24 paraganas"
-    ) ~ "north 24 parganas",
-
-    x %in% c(
-      "south twenty four parganas",
-      "south 24 parganas",
-      "24 parganas south",
-      "south 24 paraganas"
-    ) ~ "south 24 parganas",
-
-    x %in% c(
-      "calcutta",
-      "kolkata"
-    ) ~ "kolkata",
-
-    x %in% c(
-      "kancheepuram",
-      "kanchipuram",
-      "kanchipuram district"
-    ) ~ "kanchipuram",
-
-    x %in% c(
-      "ahmadabad",
-      "ahmedabad"
-    ) ~ "ahmedabad",
-
-    x %in% c(
-      "bombay suburban",
-      "mumbai suburban"
-    ) ~ "mumbai suburban",
-
-    x %in% c(
-      "bombay city",
-      "mumbai city"
-    ) ~ "mumbai city",
-
-    x %in% c(
-      "kanpur",
-      "kanpur nagar"
-    ) ~ "kanpur nagar",
-
-    x %in% c(
-      "ahmadnagar",
-      "ahmednagar",
-      "ahilyanagar"
-    ) ~ "ahilyanagar",
-
-    TRUE ~ x
-  )
-}
-
-
-official_district_lookup <- official_district_lookup %>%
+    raw_district_key
+  ) %>%
+  
+  arrange(
+    state_code,
+    district_code
+  ) %>%
+  
   mutate(
-    district_name_key = normalise_district_name(
-      district_name
-    )
+    canonical_key = raw_district_key,
+    district_uid = row_number()
   )
 
 
-# ============================================================
-# 5. Attach official district names to one PLFS dataset
-# ============================================================
+# ================================================================
+# 6. DISTRICTS WHOSE CODE / STATE CHANGED
+# ================================================================
+#
+# These later codes refer to districts already present in
+# the 2017-19 baseline.
+#
+# They inherit the OLD canonical key and UID.
+# ================================================================
 
-attach_official_district_name <- function(
-    data,
-    panel
-) {
+continuity_map <- tribble(
+  
+  ~state_code, ~district_code, ~canonical_key, ~district_name,
+  
+  
+  # ------------------------------------------------
+  # LADAKH
+  # ------------------------------------------------
+  
+  # Leh:
+  # old Jammu & Kashmir 01-03
+  # later Ladakh 37-01
+  
+  37,  1, "01-03", "Leh-Ladakh",
+  
+  
+  # Kargil:
+  # old Jammu & Kashmir 01-04
+  # later Ladakh 37-02
+  
+  37,  2, "01-04", "Kargil",
+  
+  
+  # ------------------------------------------------
+  # DADRA & NAGAR HAVELI
+  # ------------------------------------------------
+  
+  # old state 26 district 1
+  # later state 25 district 3
+  
+  25,  3, "26-01", "Dadra & Nagar Haveli",
+  
+  
+  # ------------------------------------------------
+  # TELANGANA
+  # ------------------------------------------------
+  
+  # Old Nizamabad 36-02 -> later 36-05
+  36,  5, "36-02", "Nizamabad",
+  
+  # Old Karimnagar 36-03 -> later 36-13
+  36, 13, "36-03", "Karimnagar",
+  
+  # Old Medak 36-04 -> later 36-17
+  36, 17, "36-04", "Medak",
+  
+  # Old Hyderabad 36-05 -> later 36-22
+  36, 22, "36-05", "Hyderabad",
+  
+  # Old Rangareddy 36-06 -> later 36-23
+  36, 23, "36-06", "Rangareddy",
+  
+  # Old Mahbubnagar 36-07 -> later 36-25
+  36, 25, "36-07", "Mahbubnagar",
+  
+  # Old Nalgonda 36-08 -> later 36-29
+  36, 29, "36-08", "Nalgonda",
+  
+  # Old Khammam 36-10 -> later 36-31
+  36, 31, "36-10", "Khammam"
+)
 
-  if (length(panel) == 1) {
-    panel <- rep(
-      panel,
-      nrow(data)
-    )
-  }
 
-  if (length(panel) != nrow(data)) {
-    stop(
-      "The panel vector must have one value per observation."
-    )
-  }
-
-  data$.original_row_order <- seq_len(
-    nrow(data)
-  )
-
-  data$.district_panel <- as.character(
-    panel
-  )
-
-  data$.state_code_join <- suppressWarnings(
-    as.integer(
-      data$state_code_std
-    )
-  )
-
-  data$.district_code_join <- suppressWarnings(
-    as.integer(
-      data$district_code_std
-    )
-  )
+# ================================================================
+# NOTE ABOUT WARANGAL
+# ================================================================
+#
+# Old:
+#   36-09 = Warangal
+#
+# Later:
+#   36-11 = Warangal Rural
+#   36-12 = Warangal Urban
+#
+# Old Warangal was split.
+#
+# Neither new district is treated as geographically identical
+# to the old district.
+#
+# Therefore both later districts receive NEW UIDs.
+# ================================================================
 
 
-  data <- data %>%
-    select(
-      -any_of(
-        c(
-          "district_name",
-          "district_name_key"
-        )
-      )
-    ) %>%
+# ================================================================
+# 7. TELANGANA NEW DISTRICTS THAT REUSE OLD NUMERIC CODES
+# ================================================================
+#
+# Example:
+#
+# 2017-19:
+#   36-04 = Medak
+#
+# 2019+:
+#   36-04 = Nirmal
+#
+# Later Nirmal therefore cannot simply use "36-04",
+# because that canonical key belongs to old Medak.
+# ================================================================
+
+telangana_new_reused <- tribble(
+  
+  ~state_code, ~district_code, ~canonical_key, ~district_name,
+  
+  36,  2, "NEW-36-02", "Kumaram Bheem",
+  36,  3, "NEW-36-03", "Mancherial",
+  36,  4, "NEW-36-04", "Nirmal",
+  36,  6, "NEW-36-06", "Jagtial",
+  36,  7, "NEW-36-07", "Peddapalli",
+  36,  8, "NEW-36-08", "Jayashankar",
+  36,  9, "NEW-36-09", "Bhadradri Kothagudem",
+  36, 10, "NEW-36-10", "Mahabubabad"
+)
+
+
+# ================================================================
+# 8. FUNCTION TO HARMONISE 2019+ DISTRICT CODES
+# ================================================================
+
+harmonise_post2019 <- function(df) {
+  
+  df %>%
+    
+    # Check for continuing districts whose code/state changed
     left_join(
-      official_district_lookup %>%
+      
+      continuity_map %>%
         select(
-          panel,
           state_code,
           district_code,
-          district_name,
-          district_name_key
+          continuity_key = canonical_key
         ),
-
+      
       by = c(
-        ".district_panel" = "panel",
-        ".state_code_join" = "state_code",
-        ".district_code_join" = "district_code"
+        "state_code",
+        "district_code"
       )
     ) %>%
-    arrange(
-      .original_row_order
+    
+    
+    # Check for genuinely new Telangana districts
+    # occupying recycled codes
+    left_join(
+      
+      telangana_new_reused %>%
+        select(
+          state_code,
+          district_code,
+          reused_new_key = canonical_key
+        ),
+      
+      by = c(
+        "state_code",
+        "district_code"
+      )
     ) %>%
+    
+    
+    mutate(
+      
+      canonical_key = case_when(
+        
+        # Existing district with changed code/state
+        !is.na(continuity_key) ~
+          continuity_key,
+        
+        # Genuinely new Telangana district using recycled code
+        !is.na(reused_new_key) ~
+          reused_new_key,
+        
+        # Everything else:
+        #
+        # existing unchanged district retains its pair
+        #
+        # genuinely new district gets its new pair
+        TRUE ~ raw_district_key
+      )
+    ) %>%
+    
+    
     select(
-      -.original_row_order,
-      -.state_code_join,
-      -.district_code_join,
-      -.district_panel
+      -continuity_key,
+      -reused_new_key
     )
-
-  data
 }
 
 
-# Panel assignments
-analysis17_18 <- attach_official_district_name(
-  analysis17_18,
-  panel = "panel1"
-)
-
-analysis18_19 <- attach_official_district_name(
-  analysis18_19,
-  panel = "panel1"
-)
-
-analysis19_20 <- attach_official_district_name(
-  analysis19_20,
-  panel = "panel2"
-)
-
-analysis20_21 <- attach_official_district_name(
-  analysis20_21,
-  panel = "panel2"
-)
-
-analysis22 <- attach_official_district_name(
-  analysis22,
-  panel = "panel3"
-)
-
-
-# Calendar 2023 combines the second half of Panel 3
-# and the first half of Panel 4.
-analysis23_panel <- ifelse(
-  analysis23$quarter %in% c(1L, 2L),
-  "panel3",
-  "panel4"
-)
-
-analysis23 <- attach_official_district_name(
-  analysis23,
-  panel = analysis23_panel
-)
-
-
-analysis24 <- attach_official_district_name(
-  analysis24,
-  panel = "panel4"
-)
-
-analysis25 <- attach_official_district_name(
-  analysis25,
-  panel = "y2025"
-)
-
-
-# ============================================================
-# 6. Official source registry
-#
-# Source URLs are retained in the resulting datasets so each
-# positive metro classification can be audited.
-# ============================================================
-
-metro_sources <- tribble(
-  ~source_id, ~metro_source_url,
-
-  "DMRC",
-  "https://www.delhimetrorail.com/pages/en/introduction",
-
-  "JMRC",
-  "https://transport.rajasthan.gov.in/content/transportportal/en/metro.html",
-
-  "BMRCL",
-  "https://english.bmrc.co.in/",
-
-  "CMRL",
-  "https://chennaimetrorail.org/",
-
-  "KMRL",
-  "https://kochimetro.org/",
-
-  "KOLKATA_METRO",
-  "https://mtp.indianrailways.gov.in/",
-
-  "MMRDA",
-  "https://mmrda.maharashtra.gov.in/en/projects/transport/metro-line-1/overview",
-
-  "HMRL",
-  "https://hmrl.co.in/",
-
-  "PIB_LUCKNOW",
-  "https://www.pib.gov.in/newsite/PrintRelease.aspx?lang=2&reg=48&relid=170511",
-
-  "PIB_BAHADURGARH",
-  "https://www.pib.gov.in/Pressreleaseshare.aspx?PRID=1536394",
-
-  "PIB_AHMEDABAD",
-  "https://www.pib.gov.in/PressReleasePage.aspx?PRID=1567375",
-
-  "PIB_NAGPUR",
-  "https://www.pib.gov.in/PressReleasePage.aspx?PRID=1568013",
-
-  "PIB_KANPUR",
-  "https://www.pib.gov.in/PressReleasePage.aspx?PRID=1844647",
-
-  "PIB_PUNE",
-  "https://www.pib.gov.in/PressReleasePage.aspx?PRID=1803340",
-
-  "CIDCO",
-  "https://cidco.maharashtra.gov.in/",
-
-  "PIB_AGRA_HOWRAH",
-  "https://www.pib.gov.in/PressReleasePage.aspx?PRID=2011999",
-
-  "PIB_GANDHINAGAR",
-  "https://www.pib.gov.in/PressReleasePage.aspx?PRID=2055368",
-
-  "MMRCL",
-  "https://mmrcl.com/",
-
-  "PIB_INDORE",
-  "https://www.pib.gov.in/PressReleasePage.aspx?PRID=2132584",
-
-  "PIB_BHOPAL",
-  "https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=2207030&lang=2&reg=48"
-)
-
-
-# ============================================================
-# 7. District-level metro-opening crosswalk
-#
-# pre_sample = TRUE means that the district already had an
-# operational metro before the first PLFS quarter, 2017 Q3.
-#
-# manual_review = 1 flags cases affected by changing district
-# boundaries or metro lines crossing district boundaries.
-# ============================================================
-
-metro_district_crosswalk <- tribble(
-  ~state_code, ~district_name,          ~metro_system,
-  ~opening_year, ~opening_quarter, ~pre_sample,
-  ~source_id, ~manual_review, ~metro_note,
-
-  6L, "Gurugram", "Delhi Metro / Rapid Metro",
-  2010L, 2L, TRUE,
-  "DMRC", 0L,
-  "Operational before the PLFS sample.",
-
-  6L, "Faridabad", "Delhi Metro",
-  2015L, 3L, TRUE,
-  "DMRC", 0L,
-  "Operational before the PLFS sample.",
-
-  6L, "Jhajjar", "Delhi Metro: Bahadurgarh extension",
-  2018L, 2L, FALSE,
-  "PIB_BAHADURGARH", 0L,
-  "Bahadurgarh is within Jhajjar district.",
-
-
-  9L, "Ghaziabad", "Delhi Metro",
-  2011L, 3L, TRUE,
-  "DMRC", 0L,
-  "Vaishali metro was operational before the PLFS sample.",
-
-  9L, "Gautam Buddha Nagar", "Delhi Metro / Noida Metro",
-  2009L, 4L, TRUE,
-  "DMRC", 0L,
-  "Noida had metro service before the PLFS sample.",
-
-  9L, "Lucknow", "Lucknow Metro",
-  2017L, 3L, FALSE,
-  "PIB_LUCKNOW", 0L,
-  "Priority corridor inaugurated in September 2017.",
-
-  9L, "Kanpur Nagar", "Kanpur Metro",
-  2021L, 4L, FALSE,
-  "PIB_KANPUR", 0L,
-  "Commercial operation began in December 2021.",
-
-  9L, "Agra", "Agra Metro",
-  2024L, 1L, FALSE,
-  "PIB_AGRA_HOWRAH", 0L,
-  "First operational stretch inaugurated in March 2024.",
-
-
-  8L, "Jaipur", "Jaipur Metro",
-  2015L, 2L, TRUE,
-  "JMRC", 0L,
-  "Operational before the PLFS sample.",
-
-
-  24L, "Ahmedabad", "Ahmedabad Metro",
-  2019L, 1L, FALSE,
-  "PIB_AHMEDABAD", 0L,
-  "First operational section inaugurated in March 2019.",
-
-  24L, "Gandhinagar", "Ahmedabad-Gandhinagar Metro",
-  2024L, 3L, FALSE,
-  "PIB_GANDHINAGAR", 0L,
-  "Phase II inaugurated in September 2024.",
-
-
-  27L, "Mumbai Suburban", "Mumbai Metro",
-  2014L, 2L, TRUE,
-  "MMRDA", 0L,
-  "Mumbai Metro Line 1 was operational before the sample.",
-
-  27L, "Mumbai City", "Mumbai Metro Line 3",
-  2025L, 2L, FALSE,
-  "MMRCL", 1L,
-  paste(
-    "Southward extension reached Mumbai City district",
-    "during 2025 Q2; review against final station boundaries."
-  ),
-
-  27L, "Thane", "Navi Mumbai Metro",
-  2023L, 4L, FALSE,
-  "CIDCO", 1L,
-  paste(
-    "Navi Mumbai Metro crosses the Thane-Raigad boundary;",
-    "retain for boundary audit."
-  ),
-
-  27L, "Raigad", "Navi Mumbai Metro",
-  2023L, 4L, FALSE,
-  "CIDCO", 1L,
-  paste(
-    "Navi Mumbai Metro crosses the Thane-Raigad boundary;",
-    "retain for boundary audit."
-  ),
-
-  27L, "Nagpur", "Nagpur Metro",
-  2019L, 1L, FALSE,
-  "PIB_NAGPUR", 0L,
-  "First operational section inaugurated in March 2019.",
-
-  27L, "Pune", "Pune Metro",
-  2022L, 1L, FALSE,
-  "PIB_PUNE", 0L,
-  "First operational sections inaugurated in March 2022.",
-
-
-  29L, "Bengaluru Urban", "Namma Metro",
-  2011L, 4L, TRUE,
-  "BMRCL", 0L,
-  "Operational before the PLFS sample.",
-
-
-  36L, "Hyderabad", "Hyderabad Metro",
-  2017L, 4L, FALSE,
-  "HMRL", 0L,
-  "First operational corridors opened in November 2017.",
-
-  36L, "Rangareddy", "Hyderabad Metro",
-  2017L, 4L, FALSE,
-  "HMRL", 1L,
-  "First corridor crosses Hyderabad metropolitan district boundaries.",
-
-  36L, "Medchal Malkajgiri", "Hyderabad Metro",
-  2017L, 4L, FALSE,
-  "HMRL", 1L,
-  "First corridor crosses Hyderabad metropolitan district boundaries.",
-
-
-  33L, "Chennai", "Chennai Metro",
-  2015L, 2L, TRUE,
-  "CMRL", 0L,
-  "Operational before the PLFS sample.",
-
-  33L, "Kanchipuram", "Chennai Metro",
-  2015L, 2L, TRUE,
-  "CMRL", 1L,
-  paste(
-    "Review because Chennai district boundaries expanded",
-    "during the study period."
-  ),
-
-
-  32L, "Ernakulam", "Kochi Metro",
-  2017L, 2L, TRUE,
-  "KMRL", 0L,
-  "Kochi Metro opened immediately before the first PLFS quarter.",
-
-
-  19L, "Kolkata", "Kolkata Metro",
-  1984L, 4L, TRUE,
-  "KOLKATA_METRO", 0L,
-  "Operational before the PLFS sample.",
-
-  19L, "North 24 Parganas", "Kolkata Metro",
-  1995L, 3L, TRUE,
-  "KOLKATA_METRO", 1L,
-  "Dum Dum and later extensions serve this district.",
-
-  19L, "Howrah", "Kolkata Metro: East-West line",
-  2024L, 1L, FALSE,
-  "PIB_AGRA_HOWRAH", 0L,
-  "Howrah Maidan-Esplanade section opened in March 2024.",
-
-
-  23L, "Indore", "Indore Metro",
-  2025L, 2L, FALSE,
-  "PIB_INDORE", 0L,
-  "Passenger services inaugurated in May 2025.",
-
-  23L, "Bhopal", "Bhopal Metro",
-  2025L, 4L, FALSE,
-  "PIB_BHOPAL", 0L,
-  "Priority corridor opened in December 2025."
-) %>%
+# ================================================================
+# 9. BASELINE CANONICAL KEYS
+# ================================================================
+
+datasets$analysis17_18 <-
+  datasets$analysis17_18 %>%
   mutate(
-    district_name_key = normalise_district_name(
-      district_name
-    ),
+    canonical_key = raw_district_key
+  )
 
-    metro_pre_sample = as.integer(
-      pre_sample
-    ),
+datasets$analysis18_19 <-
+  datasets$analysis18_19 %>%
+  mutate(
+    canonical_key = raw_district_key
+  )
 
-    metro_start_period_index = case_when(
-      pre_sample ~ 0L,
 
-      TRUE ~
-        opening_year * 4L +
-        opening_quarter
-    ),
+# ================================================================
+# 10. APPLY HARMONISATION TO 2019+
+# ================================================================
 
-    metro_manual_review = as.integer(
-      manual_review
+post2019_datasets <- c(
+  "analysis19_20",
+  "analysis20_21",
+  "analysis21_22",
+  "analysis22Jul_23Dec",
+  "analysis24"
+)
+
+
+for (dataset_name in post2019_datasets) {
+  
+  datasets[[dataset_name]] <-
+    harmonise_post2019(
+      datasets[[dataset_name]]
     )
-  ) %>%
-  left_join(
-    metro_sources,
-    by = "source_id"
-  ) %>%
-  transmute(
-    state_code,
-    district_name_key,
+}
 
-    metro_system,
 
-    metro_opening_year =
-      as.integer(opening_year),
+# ================================================================
+# 11. FIND ALL DISTRICTS APPEARING FROM 2019-20 ONWARD
+# ================================================================
 
-    metro_opening_quarter =
-      as.integer(opening_quarter),
-
-    metro_start_period_index =
-      as.integer(metro_start_period_index),
-
-    metro_pre_sample,
-
-    metro_source_id = source_id,
-
-    metro_source_url,
-
-    metro_manual_review,
-
-    metro_note
+all_post2019_keys <- bind_rows(
+  
+  lapply(
+    post2019_datasets,
+    
+    function(dataset_name) {
+      
+      datasets[[dataset_name]] %>%
+        distinct(canonical_key)
+    }
   )
-
-
-# ============================================================
-# 8. Delhi state-level rule
-#
-# Every PLFS district in Delhi is treated as having metro
-# infrastructure throughout the study period.
-#
-# The historical opening quarter differs by district, but every
-# Delhi district was already served before the PLFS sample.
-# ============================================================
-
-metro_state_crosswalk <- tibble(
-  state_code = 7L,
-
-  metro_system =
-    "Delhi Metro",
-
-  metro_opening_year =
-    NA_integer_,
-
-  metro_opening_quarter =
-    NA_integer_,
-
-  metro_start_period_index =
-    0L,
-
-  metro_pre_sample =
-    1L,
-
-  metro_source_id =
-    "DMRC",
-
-  metro_manual_review =
-    1L,
-
-  metro_note = paste(
-    "All Delhi districts are coded as pre-sample metro districts.",
-    "District-specific historical opening dates vary."
-  )
+  
 ) %>%
-  left_join(
-    metro_sources,
-    by = c(
-      "metro_source_id" = "source_id"
+  
+  filter(
+    !is.na(canonical_key)
+  ) %>%
+  
+  distinct()
+
+
+# ================================================================
+# 12. IDENTIFY GENUINELY NEW DISTRICTS
+# ================================================================
+#
+# Any canonical key that did not exist in the 2017-19 baseline
+# receives a new UID.
+#
+# This automatically picks up:
+#
+# - Tripura additions
+# - Assam additions
+# - West Bengal additions
+# - Gujarat additions
+# - Telangana additions
+# - any other genuinely new pair
+# ================================================================
+
+new_district_lookup <- all_post2019_keys %>%
+  
+  anti_join(
+    
+    baseline_lookup %>%
+      select(canonical_key),
+    
+    by = "canonical_key"
+  ) %>%
+  
+  arrange(canonical_key)
+
+
+# ================================================================
+# 13. ASSIGN NEW UIDs AFTER BASELINE IDs
+# ================================================================
+
+max_baseline_uid <-
+  max(
+    baseline_lookup$district_uid,
+    na.rm = TRUE
+  )
+
+
+new_district_lookup <- new_district_lookup %>%
+  
+  mutate(
+    
+    district_uid =
+      max_baseline_uid +
+      row_number()
+  )
+
+
+# ================================================================
+# 14. COMPLETE DISTRICT UID LOOKUP TABLE
+# ================================================================
+
+district_uid_lookup <- bind_rows(
+  
+  baseline_lookup %>%
+    select(
+      canonical_key,
+      district_uid
+    ),
+  
+  new_district_lookup %>%
+    select(
+      canonical_key,
+      district_uid
     )
+  
+) %>%
+  
+  distinct(
+    canonical_key,
+    .keep_all = TRUE
+  ) %>%
+  
+  arrange(
+    district_uid
   )
 
 
-# ============================================================
-# 9. Add metro indicators to one dataset
-# ============================================================
+# ================================================================
+# 15. ADD UID BACK TO EVERY PLFS DATASET
+# ================================================================
 
-add_metro_flag <- function(data) {
+add_district_uid <- function(df) {
+  
+  df %>%
+    
+    select(
+      -any_of("district_uid")
+    ) %>%
+    
+    left_join(
+      
+      district_uid_lookup,
+      
+      by = "canonical_key"
+    )
+}
 
-  required_columns <- c(
-    "state_code_std",
-    "district_name_key",
-    "year",
-    "quarter",
-    "period_index"
+
+for (dataset_name in names(datasets)) {
+  
+  datasets[[dataset_name]] <-
+    add_district_uid(
+      datasets[[dataset_name]]
+    )
+}
+
+
+# ================================================================
+# 16. WRITE UPDATED DATASETS BACK INTO GLOBAL ENVIRONMENT
+# ================================================================
+
+for (dataset_name in names(datasets)) {
+  
+  assign(
+    dataset_name,
+    datasets[[dataset_name]],
+    envir = .GlobalEnv
+  )
+}
+
+
+# ================================================================
+# 17. AUDIT 1:
+# CHECK FOR MISSING DISTRICT UIDs
+# ================================================================
+
+missing_uid_audit <- bind_rows(
+  
+  lapply(
+    names(datasets),
+    
+    function(dataset_name) {
+      
+      datasets[[dataset_name]] %>%
+        
+        summarise(
+          
+          dataset = dataset_name,
+          
+          observations = n(),
+          
+          missing_state =
+            sum(is.na(state_code)),
+          
+          missing_district =
+            sum(is.na(district_code)),
+          
+          missing_uid =
+            sum(is.na(district_uid))
+        )
+    }
+  )
+)
+
+
+print(
+  missing_uid_audit
+)
+
+
+# ================================================================
+# 18. AUDIT 2:
+# INSPECT TELANGANA OVER TIME
+# ================================================================
+
+telangana_audit <- bind_rows(
+  
+  lapply(
+    names(datasets),
+    
+    function(dataset_name) {
+      
+      datasets[[dataset_name]] %>%
+        
+        filter(
+          state_code == 36
+        ) %>%
+        
+        distinct(
+          survey_period,
+          state_code,
+          district_code,
+          raw_district_key,
+          canonical_key,
+          district_uid
+        )
+    }
+  )
+  
+) %>%
+  
+  arrange(
+    district_uid,
+    survey_period
   )
 
-  missing_columns <- setdiff(
-    required_columns,
-    names(data)
+
+print(
+  telangana_audit,
+  n = Inf
+)
+
+
+# ================================================================
+# 19. AUDIT 3:
+# SHOW CODES THAT WERE CHANGED DURING HARMONISATION
+# ================================================================
+
+changed_code_audit <- bind_rows(
+  
+  lapply(
+    names(datasets),
+    
+    function(dataset_name) {
+      
+      datasets[[dataset_name]] %>%
+        
+        filter(
+          raw_district_key != canonical_key
+        ) %>%
+        
+        distinct(
+          survey_period,
+          state_code,
+          district_code,
+          raw_district_key,
+          canonical_key,
+          district_uid
+        )
+    }
+  )
+  
+) %>%
+  
+  arrange(
+    canonical_key,
+    survey_period
   )
 
-  if (length(missing_columns) > 0) {
-    stop(
+
+print(
+  changed_code_audit,
+  n = Inf
+)
+
+
+# ================================================================
+# 20. AUDIT 4:
+# WHICH UIDs ARE REPRESENTED BY MULTIPLE RAW CODES?
+# ================================================================
+#
+# Expected examples:
+#
+# Medak:
+#   36-04 and 36-17
+#
+# Hyderabad:
+#   36-05 and 36-22
+#
+# Leh:
+#   01-03 and 37-01
+#
+# ================================================================
+
+uid_raw_code_audit <- bind_rows(
+  
+  lapply(
+    names(datasets),
+    
+    function(dataset_name) {
+      
+      datasets[[dataset_name]] %>%
+        
+        distinct(
+          district_uid,
+          canonical_key,
+          raw_district_key
+        )
+    }
+  )
+  
+) %>%
+  
+  filter(
+    !is.na(district_uid)
+  ) %>%
+  
+  group_by(
+    district_uid,
+    canonical_key
+  ) %>%
+  
+  summarise(
+    
+    n_raw_codes =
+      n_distinct(raw_district_key),
+    
+    raw_codes =
       paste(
-        "Missing columns:",
-        paste(missing_columns, collapse = ", ")
-      )
+        sort(
+          unique(raw_district_key)
+        ),
+        collapse = ", "
+      ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  filter(
+    n_raw_codes > 1
+  ) %>%
+  
+  arrange(
+    district_uid
+  )
+
+
+print(
+  uid_raw_code_audit,
+  n = Inf
+)
+
+
+# ================================================================
+# 21. AUDIT 5:
+# IDENTIFY RAW STATE-DISTRICT CODES REUSED FOR DIFFERENT PLACES
+# ================================================================
+#
+# Expected particularly in Telangana:
+#
+# 36-04:
+#   old Medak
+#   later Nirmal
+#
+# ================================================================
+
+raw_code_reuse_audit <- bind_rows(
+  
+  lapply(
+    names(datasets),
+    
+    function(dataset_name) {
+      
+      datasets[[dataset_name]] %>%
+        
+        distinct(
+          survey_period,
+          raw_district_key,
+          canonical_key,
+          district_uid
+        )
+    }
+  )
+  
+) %>%
+  
+  filter(
+    !is.na(raw_district_key)
+  ) %>%
+  
+  group_by(
+    raw_district_key
+  ) %>%
+  
+  summarise(
+    
+    n_canonical =
+      n_distinct(canonical_key),
+    
+    canonical_keys =
+      paste(
+        sort(
+          unique(canonical_key)
+        ),
+        collapse = ", "
+      ),
+    
+    district_uids =
+      paste(
+        sort(
+          unique(district_uid)
+        ),
+        collapse = ", "
+      ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  filter(
+    n_canonical > 1
+  )
+
+
+print(
+  raw_code_reuse_audit,
+  n = Inf
+)
+
+
+# ================================================================
+# 22. AUDIT 6:
+# SHOW ALL GENUINELY NEW DISTRICTS
+# ================================================================
+
+print(
+  new_district_lookup,
+  n = Inf
+)
+
+
+# ================================================================
+# 23. CHECK TREATMENT DISTRICTS
+# ================================================================
+#
+# Ahmedabad      = 24-07
+# Nagpur         = 27-09
+# Kanpur Nagar   = 09-33
+# Pune           = 27-25
+#
+# ================================================================
+
+treatment_district_audit <- bind_rows(
+  
+  lapply(
+    names(datasets),
+    
+    function(dataset_name) {
+      
+      datasets[[dataset_name]] %>%
+        
+        filter(
+          raw_district_key %in%
+            c(
+              "24-07",
+              "27-09",
+              "09-33",
+              "27-25"
+            )
+        ) %>%
+        
+        distinct(
+          survey_period,
+          state_code,
+          district_code,
+          raw_district_key,
+          canonical_key,
+          district_uid
+        )
+    }
+  )
+  
+) %>%
+  
+  arrange(
+    raw_district_key,
+    survey_period
+  )
+
+
+print(
+  treatment_district_audit,
+  n = Inf
+)
+
+
+# ================================================================
+# FINISHED
+# ================================================================
+
+message(
+  "District UID harmonisation complete."
+)
+```
+
+7.Clear memory
+```{r}
+# ================================================================
+# CLEAN UP TEMPORARY OBJECTS FROM DISTRICT HARMONISATION
+# ================================================================
+
+rm(
+  # Temporary data / lookup objects
+  datasets,
+  code_vars,
+  baseline_lookup,
+  continuity_map,
+  telangana_new_reused,
+  all_post2019_keys,
+  new_district_lookup,
+  max_baseline_uid,
+
+  # Audit tables
+  missing_uid_audit,
+  telangana_audit,
+  changed_code_audit,
+  uid_raw_code_audit,
+  raw_code_reuse_audit,
+  treatment_district_audit,
+
+  # Helper functions
+  safe_integer,
+  make_raw_key,
+  standardise_codes,
+  harmonise_post2019,
+  add_district_uid
+)
+
+# Optional: force R to reclaim unused memory
+gc()
+```
+
+
+8.Combining the analysis dataframes
+```{r}
+# ================================================================
+# 8. CREATE COMPACT HARMONISED DATA FOR DiD
+# ================================================================
+
+library(dplyr)
+library(haven)
+library(readr)
+library(here)
+
+employed_status_codes <- c("11", "12", "21", "31", "41", "51")
+
+
+# ================================================================
+# 8.1 HOUSEHOLD CONTROLS
+# ================================================================
+
+normalise_key_piece <- function(x) {
+  out <- trimws(as.character(x))
+  out[out %in% c("", "NA", "NaN")] <- NA_character_
+
+  numeric_value <- suppressWarnings(as.numeric(out))
+  numeric_piece <- !is.na(out) & !is.na(numeric_value)
+
+  out[numeric_piece] <- format(
+    numeric_value[numeric_piece],
+    scientific = FALSE,
+    trim = TRUE,
+    drop0trailing = TRUE
+  )
+
+  out
+}
+
+
+make_household_key <- function(df, key_vars) {
+
+  missing_vars <- setdiff(key_vars, names(df))
+
+  if (length(missing_vars) > 0L) {
+    stop(
+      "Missing household-key variables: ",
+      paste(missing_vars, collapse = ", ")
     )
   }
 
+  key_parts <- lapply(
+    key_vars,
+    function(v) normalise_key_piece(df[[v]])
+  )
 
-  # Make the function safe to rerun
-  data <- data %>%
-    select(
-      -any_of(
-        c(
-          "has_metro",
-          "metro_opened_this_quarter",
-          "metro_urban",
-          "metro_system",
-          "metro_opening_year",
-          "metro_opening_quarter",
-          "metro_start_period_index",
-          "metro_pre_sample",
-          "metro_source_id",
-          "metro_source_url",
-          "metro_manual_review",
-          "metro_note"
+  do.call(paste, c(key_parts, sep = "|"))
+}
+
+
+build_household_controls <- function(df,
+                                     key_vars,
+                                     household_size_var,
+                                     religion_var,
+                                     social_group_var) {
+
+  controls <- tibble(
+    household_join_key = make_household_key(df, key_vars),
+
+    household_size = suppressWarnings(
+      as.integer(as.character(df[[household_size_var]]))
+    ),
+
+    religion = suppressWarnings(
+      as.integer(as.character(df[[religion_var]]))
+    ),
+
+    social_group = suppressWarnings(
+      as.integer(as.character(df[[social_group_var]]))
+    ),
+
+    .household_match = 1L
+  )
+
+  if (anyDuplicated(controls$household_join_key)) {
+    stop("A household control file contains duplicate household keys.")
+  }
+
+  controls
+}
+
+
+read_household_controls_dta <- function(path,
+                                        key_vars,
+                                        household_size_var,
+                                        religion_var,
+                                        social_group_var) {
+
+  variables_needed <- unique(
+    c(
+      key_vars,
+      household_size_var,
+      religion_var,
+      social_group_var
+    )
+  )
+
+  household_data <- read_dta(
+    path,
+    col_select = all_of(variables_needed)
+  )
+
+  build_household_controls(
+    household_data,
+    key_vars,
+    household_size_var,
+    religion_var,
+    social_group_var
+  )
+}
+
+
+read_household_controls_csv <- function(path,
+                                        key_vars,
+                                        household_size_var,
+                                        religion_var,
+                                        social_group_var) {
+
+  variables_needed <- unique(
+    c(
+      key_vars,
+      household_size_var,
+      religion_var,
+      social_group_var
+    )
+  )
+
+  household_data <- read_csv(
+    path,
+    col_select = all_of(variables_needed),
+    show_col_types = FALSE,
+    progress = FALSE
+  )
+
+  build_household_controls(
+    household_data,
+    key_vars,
+    household_size_var,
+    religion_var,
+    social_group_var
+  )
+}
+
+
+# Person-file household identifiers: 2017-18 to 2019-20
+person_keys_early <- c(
+  "quarter_per_fv",
+  "visit_per_fv",
+  "b1q3_per_fv",
+  "state_per_fv",
+  "b1q4_per_fv",
+  "nss_region_per_fv",
+  "b1q5_per_fv",
+  "b1q6_per_fv",
+  "b1q11_per_fv",
+  "fsu_per_fv",
+  "b1q13_per_fv",
+  "b1q14_per_fv",
+  "b1q15_per_fv"
+)
+
+
+# Household-file identifiers: 2017-18 and 2019-20
+household_keys_early_fv <- c(
+  "qtr_hh_fv",
+  "visit_hh_fv",
+  "b1q3_hh_fv",
+  "state_hh_fv",
+  "dist_code_hh_fv",
+  "nss_region_hh_fv",
+  "b1q5_hh_fv",
+  "b1q6_hh_fv",
+  "b1q11_hh_fv",
+  "b1q1_hh_fv",
+  "b1q13_hh_fv",
+  "b1q14_hh_fv",
+  "b1q15_hh_fv"
+)
+
+
+# The 2018-19 household file uses the _rv suffix even though it is
+# the household file corresponding to the first-visit person file.
+household_keys_2018 <- c(
+  "qtr_hh_rv",
+  "visit_hh_rv",
+  "b1q3_hh_rv",
+  "state_hh_rv",
+  "dist_code_hh_rv",
+  "nss_region_hh_rv",
+  "b1q5_hh_rv",
+  "b1q6_hh_rv",
+  "b1q11_hh_rv",
+  "b1q1_hh_rv",
+  "b1q13_hh_rv",
+  "b1q14_hh_rv",
+  "b1q15_hh_rv"
+)
+
+
+# Person-file identifiers: 2020-21 to 2023-24
+person_keys_later <- c(
+  "qtr_perv1",
+  "visit_perv1",
+  "b1q3_perv1",
+  "state_perv1",
+  "distcode_perv1",
+  "nss_region_perv1",
+  "b1q5_perv1",
+  "b1q6_perv1",
+  "b1q11_perv1",
+  "b1q1_perv1",
+  "b1q13_perv1",
+  "b1q14_perv1",
+  "b1q15_perv1"
+)
+
+
+# Household-file identifiers: 2020-21 to 2023-24
+household_keys_later <- c(
+  "qtr_hhv1",
+  "visit_hhv1",
+  "b1q3_hhv1",
+  "state_hhv1",
+  "distcode_hhv1",
+  "nss_region_hhv1",
+  "b1q5_hhv1",
+  "b1q6_hhv1",
+  "b1q11_hhv1",
+  "b1q1_hhv1",
+  "b1q13_hhv1",
+  "b1q14_hhv1",
+  "b1q15_hhv1"
+)
+
+
+# Calendar-year 2024 identifiers
+person_keys_2024 <- c(
+  "Quarter",
+  "Visit",
+  "Sector",
+  "State_UT_Code",
+  "District_Code",
+  "NSS_Region",
+  "Stratum",
+  "Sub_Stratum",
+  "Sub_Sample",
+  "FSU",
+  "Sample_Sg_Sb_No",
+  "Second_Stage_Stratum_No",
+  "Sample_Household_Number"
+)
+
+
+household_keys_2024 <- c(
+  "Quarter",
+  "Visit",
+  "Sector",
+  "State_Ut_Code",
+  "District_Code",
+  "NSS_Region",
+  "Stratum",
+  "Sub_Stratum",
+  "Sub_Sample",
+  "FSU",
+  "Sample_Sg_Sb_No",
+  "Second_Stage_Stratum_No",
+  "Sample_Household_Number"
+)
+
+
+# Load only the household variables required for the controls.
+hh_controls_17_18 <- read_household_controls_dta(
+  here("Data", "17-18", "hhfv_2017-18.dta"),
+  household_keys_early_fv,
+  "b3q1_hh_fv",
+  "b3q3_hh_fv",
+  "b3q4_hh_fv"
+)
+
+
+hh_controls_18_19 <- read_household_controls_dta(
+  here("Data", "18-19", "HHV1_2018-19 (1).dta"),
+  household_keys_2018,
+  "b3q1_hh_rv",
+  "b3q3_hh_rv",
+  "b3q4_hh_rv"
+)
+
+
+hh_controls_19_20 <- read_household_controls_dta(
+  here("Data", "19-20", "HHFV_2019-20.dta"),
+  household_keys_early_fv,
+  "b3q1_hh_fv",
+  "b3q3_hh_fv",
+  "b3q4_hh_fv"
+)
+
+
+hh_controls_20_21 <- read_household_controls_dta(
+  here("Data", "20-21", "hhv1.dta"),
+  household_keys_later,
+  "b3q1_hhv1",
+  "b3q3_hhv1",
+  "b3q4_hhv1"
+)
+
+
+hh_controls_21_22 <- read_household_controls_csv(
+  here("Data", "21-22", "hhv1.csv"),
+  household_keys_later,
+  "b3q1_hhv1",
+  "b3q3_hhv1",
+  "b3q4_hhv1"
+)
+
+
+hh_controls_22_23 <- read_household_controls_dta(
+  here("Data", "22-23", "hhv1 (1).dta"),
+  household_keys_later,
+  "b3q1_hhv1",
+  "b3q3_hhv1",
+  "b3q4_hhv1"
+)
+
+
+# Add Q1 and Q2 from the 2023-24 household file so that the
+# household-control periods match analysis22Jul_23Dec.
+hh_23_24_variables <- unique(
+  c(
+    household_keys_later,
+    "b3q1_hhv1",
+    "b3q3_hhv1",
+    "b3q4_hhv1"
+  )
+)
+
+
+hh_23_24_q1q2 <- read_dta(
+  here("Data", "23-24", "hhv1.dta"),
+  col_select = all_of(hh_23_24_variables)
+) %>%
+  filter(qtr_hhv1 %in% c("Q1", "Q2"))
+
+
+hh_controls_23_24_q1q2 <- build_household_controls(
+  hh_23_24_q1q2,
+  household_keys_later,
+  "b3q1_hhv1",
+  "b3q3_hhv1",
+  "b3q4_hhv1"
+)
+
+
+hh_controls_22Jul_23Dec <- bind_rows(
+  hh_controls_22_23,
+  hh_controls_23_24_q1q2
+)
+
+
+if (anyDuplicated(hh_controls_22Jul_23Dec$household_join_key)) {
+  stop("Duplicate household keys after combining 2022-23 and 2023-24.")
+}
+
+
+hh_controls_24 <- read_household_controls_dta(
+  here("Data", "24", "chhv1.dta"),
+  household_keys_2024,
+  "Household_Size",
+  "Religion",
+  "Social_Group"
+)
+
+
+# ================================================================
+# 8.2 CONVERT EACH PERSON FILE TO THE SAME DiD VARIABLES
+# ================================================================
+
+make_did_wave <- function(df,
+                          household_controls,
+                          person_key_vars,
+                          urban_var,
+                          status_var,
+                          age_var,
+                          sex_var,
+                          marital_var,
+                          education_var) {
+
+  required_variables <- unique(
+    c(
+      person_key_vars,
+      urban_var,
+      status_var,
+      age_var,
+      sex_var,
+      marital_var,
+      education_var,
+      "survey_period",
+      "period",
+      "state_code",
+      "district_code",
+      "district_uid",
+      "city_size_stratum",
+      "eligible_city",
+      "metro_system",
+      "first_treat",
+      "first_treat_opening_quarter",
+      "Treatment",
+      "Treatment_opening_quarter",
+      "weight",
+      "transport",
+      "informal",
+      "NotControl"
+    )
+  )
+
+  missing_variables <- setdiff(required_variables, names(df))
+
+  if (length(missing_variables) > 0L) {
+    stop(
+      "The following variables are missing from a person wave: ",
+      paste(missing_variables, collapse = ", ")
+    )
+  }
+
+  original_rows <- nrow(df)
+
+  joined_data <- df %>%
+    mutate(
+      household_join_key = make_household_key(., person_key_vars)
+    ) %>%
+    left_join(
+      household_controls,
+      by = "household_join_key",
+      relationship = "many-to-one"
+    )
+
+  if (nrow(joined_data) != original_rows) {
+    stop("The household join changed the number of person observations.")
+  }
+
+  if (any(is.na(joined_data$.household_match))) {
+    stop("At least one person observation did not match a household record.")
+  }
+
+  joined_data %>%
+
+    transmute(
+
+      # Time and geography
+      survey_period = as.character(survey_period),
+      period = as.integer(period),
+
+      state_code = as.integer(state_code),
+      district_code = as.integer(district_code),
+      district_uid = as.integer(district_uid),
+
+      urban = suppressWarnings(
+        as.integer(as.character(.data[[urban_var]]))
+      ),
+
+      city_size_stratum = as.integer(city_size_stratum),
+      eligible_city = as.integer(eligible_city),
+
+
+      # Treatment variables constructed in Section 3
+      metro_system = as.character(metro_system),
+      first_treat = as.integer(first_treat),
+
+      first_treat_opening_quarter = as.integer(
+        first_treat_opening_quarter
+      ),
+
+      Treatment = as.integer(Treatment),
+
+      Treatment_opening_quarter = as.integer(
+        Treatment_opening_quarter
+      ),
+
+
+      # Survey information and existing classifications
+      weight = as.numeric(weight),
+      transport = as.integer(transport),
+      informal = as.integer(informal),
+      NotControl = as.integer(NotControl),
+
+
+      # Individual controls
+      age = suppressWarnings(
+        as.integer(as.character(.data[[age_var]]))
+      ),
+
+      sex = suppressWarnings(
+        as.integer(as.character(.data[[sex_var]]))
+      ),
+
+      marital_status = suppressWarnings(
+        as.integer(as.character(.data[[marital_var]]))
+      ),
+
+      general_education = suppressWarnings(
+        as.integer(as.character(.data[[education_var]]))
+      ),
+
+
+      # Household controls
+      household_size = as.integer(household_size),
+      religion = as.integer(religion),
+      social_group = as.integer(social_group),
+
+
+      # Temporary usual-principal-status variable
+      status = as.character(.data[[status_var]])
+    ) %>%
+
+    mutate(
+
+      # Main and robustness age samples
+      working_age_15_64 = as.integer(
+        !is.na(age) & age >= 15L & age <= 64L
+      ),
+
+      age_15_plus = as.integer(
+        !is.na(age) & age >= 15L
+      ),
+
+
+      # Flexible age categories for the conditional specification
+      age_group = case_when(
+        age >= 15L & age <= 24L ~ "15-24",
+        age >= 25L & age <= 34L ~ "25-34",
+        age >= 35L & age <= 44L ~ "35-44",
+        age >= 45L & age <= 54L ~ "45-54",
+        age >= 55L & age <= 64L ~ "55-64",
+        age >= 65L ~ "65+",
+        TRUE ~ NA_character_
+      ),
+
+      age_group = factor(
+        age_group,
+        levels = c(
+          "15-24",
+          "25-34",
+          "35-44",
+          "45-54",
+          "55-64",
+          "65+"
         )
-      )
-    ) %>%
-    mutate(
-      .state_code_num = suppressWarnings(
-        as.integer(state_code_std)
-      )
-    )
-
-
-  # Exact state-district matches
-  data <- data %>%
-    left_join(
-      metro_district_crosswalk,
-
-      by = c(
-        ".state_code_num" = "state_code",
-        "district_name_key" = "district_name_key"
-      )
-    )
-
-
-  # State-wide rules, currently used for Delhi
-  state_lookup <- metro_state_crosswalk %>%
-    rename(
-      metro_system_state =
-        metro_system,
-
-      metro_opening_year_state =
-        metro_opening_year,
-
-      metro_opening_quarter_state =
-        metro_opening_quarter,
-
-      metro_start_period_index_state =
-        metro_start_period_index,
-
-      metro_pre_sample_state =
-        metro_pre_sample,
-
-      metro_source_id_state =
-        metro_source_id,
-
-      metro_source_url_state =
-        metro_source_url,
-
-      metro_manual_review_state =
-        metro_manual_review,
-
-      metro_note_state =
-        metro_note
-    )
-
-
-  data <- data %>%
-    left_join(
-      state_lookup,
-      by = c(
-        ".state_code_num" = "state_code"
-      )
-    ) %>%
-    mutate(
-      metro_system = coalesce(
-        metro_system,
-        metro_system_state
-      ),
-
-      metro_opening_year = coalesce(
-        metro_opening_year,
-        metro_opening_year_state
-      ),
-
-      metro_opening_quarter = coalesce(
-        metro_opening_quarter,
-        metro_opening_quarter_state
-      ),
-
-      metro_start_period_index = coalesce(
-        metro_start_period_index,
-        metro_start_period_index_state
-      ),
-
-      metro_pre_sample = coalesce(
-        metro_pre_sample,
-        metro_pre_sample_state
-      ),
-
-      metro_source_id = coalesce(
-        metro_source_id,
-        metro_source_id_state
-      ),
-
-      metro_source_url = coalesce(
-        metro_source_url,
-        metro_source_url_state
-      ),
-
-      metro_manual_review = coalesce(
-        metro_manual_review,
-        metro_manual_review_state
-      ),
-
-      metro_note = coalesce(
-        metro_note,
-        metro_note_state
       ),
 
 
-      # Main district-quarter treatment indicator
-      has_metro = as.integer(
-        !is.na(metro_start_period_index) &
-          period_index >=
-          metro_start_period_index
-      ),
-
-
-      # Identifies the opening quarter itself
-      metro_opened_this_quarter = as.integer(
-        !is.na(metro_start_period_index) &
-          metro_start_period_index > 0L &
-          period_index ==
-          metro_start_period_index
-      ),
-
-
-      # Recommended exposure indicator:
-      # metro district AND urban PLFS respondent
-      metro_urban = case_when(
-        is.na(urban) ~ NA_integer_,
-
-        has_metro == 1L &
-          urban == 1L ~ 1L,
-
+      # Employment status based on usual principal status
+      employed = case_when(
+        is.na(status) | status == "" ~ NA_integer_,
+        status %in% employed_status_codes ~ 1L,
         TRUE ~ 0L
       ),
 
 
-      # Zero for districts with no verified metro match
-      metro_pre_sample = coalesce(
-        metro_pre_sample,
-        0L
+      # Total passenger-transport employment among the population
+      transport_employment = case_when(
+        is.na(employed) ~ NA_integer_,
+        employed == 0L ~ 0L,
+        employed == 1L & transport == 1L ~ 1L,
+        employed == 1L & transport == 0L ~ 0L,
+        TRUE ~ NA_integer_
       ),
 
-      metro_manual_review = coalesce(
-        metro_manual_review,
-        0L
+
+      # Employment outside the selected passenger-transport industries
+      nontransport_employment = case_when(
+        is.na(employed) ~ NA_integer_,
+        employed == 0L ~ 0L,
+        employed == 1L & transport == 0L ~ 1L,
+        employed == 1L & transport == 1L ~ 0L,
+        TRUE ~ NA_integer_
+      ),
+
+
+      # PRIMARY OUTCOME:
+      # probability that a working-age resident is employed in
+      # informal passenger transport
+      informal_transport = case_when(
+        is.na(employed) ~ NA_integer_,
+        employed == 0L ~ 0L,
+        employed == 1L & transport == 0L ~ 0L,
+        employed == 1L & transport == 1L & informal == 1L ~ 1L,
+        employed == 1L & transport == 1L & informal == 0L ~ 0L,
+        TRUE ~ NA_integer_
+      ),
+
+
+      # Formal passenger-transport employment among the population
+      formal_transport = case_when(
+        is.na(employed) ~ NA_integer_,
+        employed == 0L ~ 0L,
+        employed == 1L & transport == 0L ~ 0L,
+        employed == 1L & transport == 1L & informal == 0L ~ 1L,
+        employed == 1L & transport == 1L & informal == 1L ~ 0L,
+        TRUE ~ NA_integer_
+      ),
+
+
+      # Secondary composition outcome.
+      # This is only observed for transport workers and should not
+      # replace informal_transport as the primary outcome.
+      informal_among_transport_workers = case_when(
+        transport_employment == 1L & informal == 1L ~ 1L,
+        transport_employment == 1L & informal == 0L ~ 0L,
+        TRUE ~ NA_integer_
+      ),
+
+
+      # Event time for descriptive checks.
+      # The did package will construct its own dynamic aggregation.
+      event_time = case_when(
+        eligible_city == 1L & first_treat > 0L ~
+          period - first_treat,
+        TRUE ~ NA_integer_
+      ),
+
+      event_time_opening_quarter = case_when(
+        eligible_city == 1L & first_treat_opening_quarter > 0L ~
+          period - first_treat_opening_quarter,
+        TRUE ~ NA_integer_
       )
     ) %>%
-    select(
-      -.state_code_num,
 
-      -metro_system_state,
-      -metro_opening_year_state,
-      -metro_opening_quarter_state,
-      -metro_start_period_index_state,
-      -metro_pre_sample_state,
-      -metro_source_id_state,
-      -metro_source_url_state,
-      -metro_manual_review_state,
-      -metro_note_state
-    )
-
-
-  data
+    select(-status)
 }
 
 
-# ============================================================
-# 10. Apply the metro function to every analysis dataset
-# ============================================================
+# ================================================================
+# 8.3 HARMONISE EACH WAVE
+# ================================================================
 
-analysis17_18 <- add_metro_flag(
-  analysis17_18
-)
-
-analysis18_19 <- add_metro_flag(
-  analysis18_19
-)
-
-analysis19_20 <- add_metro_flag(
-  analysis19_20
-)
-
-analysis20_21 <- add_metro_flag(
-  analysis20_21
-)
-
-analysis22 <- add_metro_flag(
-  analysis22
-)
-
-analysis23 <- add_metro_flag(
-  analysis23
-)
-
-analysis24 <- add_metro_flag(
-  analysis24
-)
-
-analysis25 <- add_metro_flag(
-  analysis25
+did17_18 <- make_did_wave(
+  df = analysis17_18,
+  household_controls = hh_controls_17_18,
+  person_key_vars = person_keys_early,
+  urban_var = "b1q3_per_fv",
+  status_var = "b5pt1q3_per_fv",
+  age_var = "b4q6_per_fv",
+  sex_var = "b4q5_per_fv",
+  marital_var = "b4q7_per_fv",
+  education_var = "b4q8_per_fv"
 )
 
 
-# ============================================================
-# 11. Validate the resulting columns
-# ============================================================
+did18_19 <- make_did_wave(
+  df = analysis18_19,
+  household_controls = hh_controls_18_19,
+  person_key_vars = person_keys_early,
+  urban_var = "b1q3_per_fv",
+  status_var = "b5pt1q3_per_fv",
+  age_var = "b4q6_per_fv",
+  sex_var = "b4q5_per_fv",
+  marital_var = "b4q7_per_fv",
+  education_var = "b4q8_per_fv"
+)
 
-validate_metro_flags <- function(
-    data,
-    dataset_name
-) {
 
-  valid_urban_values <- all(
-    is.na(data$urban) |
-      data$urban %in% c(0L, 1L)
-  )
+did19_20 <- make_did_wave(
+  df = analysis19_20,
+  household_controls = hh_controls_19_20,
+  person_key_vars = person_keys_early,
+  urban_var = "b1q3_per_fv",
+  status_var = "b5pt1q3_per_fv",
+  age_var = "b4q6_per_fv",
+  sex_var = "b4q5_per_fv",
+  marital_var = "b4q7_per_fv",
+  education_var = "b4q8_per_fv"
+)
 
-  valid_metro_values <- all(
-    data$has_metro %in% c(0L, 1L)
-  )
 
-  valid_opening_values <- all(
-    data$metro_opened_this_quarter %in%
-      c(0L, 1L)
-  )
+did20_21 <- make_did_wave(
+  df = analysis20_21,
+  household_controls = hh_controls_20_21,
+  person_key_vars = person_keys_later,
+  urban_var = "b1q3_perv1",
+  status_var = "b5pt1q3_perv1",
+  age_var = "b4q6_perv1",
+  sex_var = "b4q5_perv1",
+  marital_var = "b4q7_perv1",
+  education_var = "b4q8_perv1"
+)
 
-  valid_metro_urban <- all(
-    is.na(data$metro_urban) |
-      data$metro_urban ==
-      as.integer(
-        data$has_metro == 1L &
-          data$urban == 1L
-      )
-  )
 
-  if (!valid_urban_values) {
-    stop(
-      dataset_name,
-      ": urban contains invalid values."
-    )
+did21_22 <- make_did_wave(
+  df = analysis21_22,
+  household_controls = hh_controls_21_22,
+  person_key_vars = person_keys_later,
+  urban_var = "b1q3_perv1",
+  status_var = "b5pt1q3_perv1",
+  age_var = "b4q6_perv1",
+  sex_var = "b4q5_perv1",
+  marital_var = "b4q7_perv1",
+  education_var = "b4q8_perv1"
+)
+
+
+did22_23 <- make_did_wave(
+  df = analysis22Jul_23Dec,
+  household_controls = hh_controls_22Jul_23Dec,
+  person_key_vars = person_keys_later,
+  urban_var = "b1q3_perv1",
+  status_var = "b5pt1q3_perv1",
+  age_var = "b4q6_perv1",
+  sex_var = "b4q5_perv1",
+  marital_var = "b4q7_perv1",
+  education_var = "b4q8_perv1"
+)
+
+
+did24 <- make_did_wave(
+  df = analysis24,
+  household_controls = hh_controls_24,
+  person_key_vars = person_keys_2024,
+  urban_var = "Sector",
+  status_var = "Principal_Status_Code",
+  age_var = "Age",
+  sex_var = "Sex",
+  marital_var = "Marital_Status",
+  education_var = "General_Education_Level"
+)
+
+
+# ================================================================
+# 8.4 STACK THE REPEATED CROSS-SECTIONS
+# ================================================================
+
+did_data_all <- bind_rows(
+  did17_18,
+  did18_19,
+  did19_20,
+  did20_21,
+  did21_22,
+  did22_23,
+  did24
+)
+
+
+# Keep only comparable Census-2011 large-city strata.
+did_data_large_cities <- did_data_all %>%
+  filter(eligible_city == 1L)
+
+
+# Remove districts that already had metro exposure and therefore
+# cannot be clean comparison units.
+did_data_analysis_pool <- did_data_large_cities %>%
+  filter(!is.na(NotControl), NotControl == 0L)
+
+
+# Main population: working-age residents aged 15-64.
+did_data <- did_data_analysis_pool %>%
+  filter(working_age_15_64 == 1L)
+
+
+# Robustness population: everyone aged 15 and above.
+did_data_15plus <- did_data_analysis_pool %>%
+  filter(age_15_plus == 1L)
+
+
+# ================================================================
+# 8.5 PRE-TREATMENT CITY-LEVEL CONTROLS
+# ================================================================
+
+weighted_mean_safe <- function(x, w) {
+  valid <- !is.na(x) & !is.na(w) & w > 0
+
+  if (!any(valid)) {
+    return(NA_real_)
   }
 
-  if (!valid_metro_values) {
-    stop(
-      dataset_name,
-      ": has_metro contains invalid values."
-    )
-  }
-
-  if (!valid_opening_values) {
-    stop(
-      dataset_name,
-      ": metro_opened_this_quarter contains invalid values."
-    )
-  }
-
-  if (!valid_metro_urban) {
-    stop(
-      dataset_name,
-      ": metro_urban was not constructed correctly."
-    )
-  }
-
-  message(
-    dataset_name,
-    ": metro and urban checks passed."
-  )
+  weighted.mean(x[valid], w[valid])
 }
 
 
-validate_metro_flags(
-  analysis17_18,
-  "2017-18"
-)
-
-validate_metro_flags(
-  analysis18_19,
-  "2018-19"
-)
-
-validate_metro_flags(
-  analysis19_20,
-  "2019-20"
-)
-
-validate_metro_flags(
-  analysis20_21,
-  "2020-21"
-)
-
-validate_metro_flags(
-  analysis22,
-  "2022"
-)
-
-validate_metro_flags(
-  analysis23,
-  "2023"
-)
-
-validate_metro_flags(
-  analysis24,
-  "2024"
-)
-
-validate_metro_flags(
-  analysis25,
-  "2025"
-)
-
-
-# ============================================================
-# 12. Combine a small district-quarter validation table
-# ============================================================
-
-# ============================================================
-# Create a standardised district-quarter validation table
-# without combining all original PLFS variables
-# ============================================================
-
-prepare_metro_validation <- function(
-    data,
-    dataset_name
-) {
-
-  data %>%
-    transmute(
-      source_dataset = dataset_name,
-
-      state_code_std = as.character(
-        state_code_std
-      ),
-
-      district_name = as.character(
-        district_name
-      ),
-
-      district_name_key = as.character(
-        district_name_key
-      ),
-
-      year = as.integer(
-        year
-      ),
-
-      quarter = as.integer(
-        quarter
-      ),
-
-      year_quarter = as.character(
-        year_quarter
-      ),
-
-      period_index = as.integer(
-        period_index
-      ),
-
-      urban = as.integer(
-        urban
-      ),
-
-      rural = as.integer(
-        rural
-      ),
-
-      has_metro = as.integer(
-        has_metro
-      ),
-
-      metro_opened_this_quarter = as.integer(
-        metro_opened_this_quarter
-      ),
-
-      metro_urban = as.integer(
-        metro_urban
-      ),
-
-      metro_system = as.character(
-        metro_system
-      ),
-
-      metro_opening_year = as.integer(
-        metro_opening_year
-      ),
-
-      metro_opening_quarter = as.integer(
-        metro_opening_quarter
-      ),
-
-      metro_manual_review = as.integer(
-        metro_manual_review
-      ),
-
-      metro_source_url = as.character(
-        metro_source_url
-      )
-    )
-}
-
-
-metro_validation_data <- bind_rows(
-  prepare_metro_validation(
-    analysis17_18,
-    "2017-18"
-  ),
-
-  prepare_metro_validation(
-    analysis18_19,
-    "2018-19"
-  ),
-
-  prepare_metro_validation(
-    analysis19_20,
-    "2019-20"
-  ),
-
-  prepare_metro_validation(
-    analysis20_21,
-    "2020-21"
-  ),
-
-  prepare_metro_validation(
-    analysis22,
-    "2022"
-  ),
-
-  prepare_metro_validation(
-    analysis23,
-    "2023"
-  ),
-
-  prepare_metro_validation(
-    analysis24,
-    "2024"
-  ),
-
-  prepare_metro_validation(
-    analysis25,
-    "2025"
-  )
-) %>%
-  distinct() %>%
-  arrange(
-    period_index,
-    state_code_std,
-    district_name
-  )
-
-
-# Opening events occurring inside the PLFS period
-metro_opening_events <- metro_validation_data %>%
-  filter(
-    metro_opened_this_quarter == 1L
-  ) %>%
-  distinct(
-    district_name,
-    year_quarter,
-    metro_system,
-    metro_source_url,
-    metro_manual_review
-  ) %>%
-  arrange(
-    year_quarter,
-    district_name
-  )
-
-print(
-  metro_opening_events
-)
-
-
-# All districts ever coded as metro districts
-positive_metro_districts <- metro_validation_data %>%
-  filter(
-    has_metro == 1L
-  ) %>%
-  distinct(
-    state_code_std,
-    district_name,
-    metro_system,
-    metro_opening_year,
-    metro_opening_quarter,
-    metro_manual_review
-  ) %>%
-  arrange(
-    state_code_std,
-    district_name
-  )
-
-print(
-  positive_metro_districts
-)
-
-
-# Cases that should be reviewed before the final dissertation
-metro_boundary_review <- positive_metro_districts %>%
-  filter(
-    metro_manual_review == 1L
-  )
-
-print(
-  metro_boundary_review
-)
-
-
-# ============================================================
-# 13. Check for impossible treatment reversals
-#
-# Once a district receives has_metro = 1, it should never
-# return to zero in a later quarter.
-# ============================================================
-
-metro_reversal_check <- metro_validation_data %>%
-  group_by(
-    state_code_std,
-    district_name_key
-  ) %>%
-  arrange(
-    period_index,
-    .by_group = TRUE
-  ) %>%
+# Periods 1-6 end before the Ahmedabad and Nagpur openings.
+# These variables are predetermined and may be used selectively
+# in sensitivity specifications.
+baseline_city_controls <- did_data %>%
+  filter(period <= 6L) %>%
+  group_by(state_code, district_uid) %>%
   summarise(
-    treatment_reversal = any(
-      diff(has_metro) < 0,
-      na.rm = TRUE
+    baseline_informal_transport_share = weighted_mean_safe(
+      informal_transport,
+      weight
+    ),
+
+    baseline_transport_employment_share = weighted_mean_safe(
+      transport_employment,
+      weight
+    ),
+
+    baseline_employment_rate = weighted_mean_safe(
+      employed,
+      weight
     ),
 
     .groups = "drop"
+  )
+
+
+did_data <- did_data %>%
+  left_join(
+    baseline_city_controls,
+    by = c("state_code", "district_uid"),
+    relationship = "many-to-one"
+  )
+
+
+did_data_15plus <- did_data_15plus %>%
+  left_join(
+    baseline_city_controls,
+    by = c("state_code", "district_uid"),
+    relationship = "many-to-one"
+  )
+
+
+# ================================================================
+# 8.6 DISTRICT-QUARTER ROBUSTNESS DATA
+# ================================================================
+
+# This is a robustness/descriptive dataset. The individual-level
+# repeated-cross-section data above remain the primary specification.
+did_district_quarter <- did_data %>%
+  group_by(
+    survey_period,
+    period,
+    state_code,
+    district_code,
+    district_uid,
+    metro_system,
+    first_treat
   ) %>%
-  filter(
-    treatment_reversal
+  summarise(
+    unweighted_n = n(),
+    population_weight = sum(weight, na.rm = TRUE),
+
+    informal_transport_rate = weighted_mean_safe(
+      informal_transport,
+      weight
+    ),
+
+    transport_employment_rate = weighted_mean_safe(
+      transport_employment,
+      weight
+    ),
+
+    formal_transport_rate = weighted_mean_safe(
+      formal_transport,
+      weight
+    ),
+
+    overall_employment_rate = weighted_mean_safe(
+      employed,
+      weight
+    ),
+
+    informal_share_among_transport_workers = weighted_mean_safe(
+      informal_among_transport_workers,
+      weight
+    ),
+
+    .groups = "drop"
   )
 
-if (nrow(metro_reversal_check) > 0) {
 
-  print(
-    metro_reversal_check
+# ================================================================
+# 8.7 FINAL VALIDATION
+# ================================================================
+
+stopifnot(
+  all(did_data$eligible_city == 1L),
+  all(did_data$NotControl == 0L),
+  all(did_data$age >= 15L & did_data$age <= 64L),
+  !any(is.na(did_data$weight)),
+  !any(did_data$weight <= 0, na.rm = TRUE)
+)
+
+
+did_sample_check <- did_data %>%
+  summarise(
+    observations = n(),
+    periods = n_distinct(period),
+    districts = n_distinct(district_uid),
+    treated_metro_systems = n_distinct(
+      metro_system[!is.na(metro_system)]
+    ),
+    missing_age = sum(is.na(age)),
+    missing_sex = sum(is.na(sex)),
+    missing_education = sum(is.na(general_education)),
+    missing_marital_status = sum(is.na(marital_status)),
+    missing_religion = sum(is.na(religion)),
+    missing_social_group = sum(is.na(social_group)),
+    missing_household_size = sum(is.na(household_size))
   )
 
-  warning(
-    "At least one district changes from has_metro = 1 back to 0."
-  )
 
-} else {
+print(did_sample_check)
 
-  message(
-    "No metro treatment reversals detected."
-  )
-}
+
+# Recommended later regression formulas:
+#
+# Unconditional benchmark:
+#   xformla = ~ 1
+#
+# Parsimonious conditional specification:
+#   xformla = ~ age_group + factor(sex) +
+#     factor(general_education) + factor(marital_status) +
+#     factor(social_group) + factor(religion) +
+#     factor(state_code)
+#
+# Household-size sensitivity:
+#   add household_size to the conditional formula.
+#
+# Do not control for transport, informal, enterprise type,
+# social-security coverage, contract type, earnings or current
+# household expenditure: these define the outcome or may be affected
+# by metro opening.
+
+
+# Optional memory clean-up
+rm(
+  hh_controls_17_18,
+  hh_controls_18_19,
+  hh_controls_19_20,
+  hh_controls_20_21,
+  hh_controls_21_22,
+  hh_controls_22_23,
+  hh_controls_23_24_q1q2,
+  hh_controls_22Jul_23Dec,
+  hh_controls_24,
+  hh_23_24_q1q2
+)
+
+gc()
+
 ```
 
 
-
+9.DID
 
